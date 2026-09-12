@@ -32,11 +32,11 @@ construction.
 |---|---|
 | `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
 | `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
-| `out/case.pptx` | The generated pages |
+| `out/v4-index-schedules.pptx` | The generated pages (15: overview + 7 methods x 2) |
 
 ```bash
 python index_schedules.py          # check the seven algorithms first (expect zero conflicts)
-python draw_case.py out/case.pptx  # generate the pages
+python draw_case.py out/v4-index-schedules.pptx   # generate the pages
 ```
 
 ## The seven index algorithms

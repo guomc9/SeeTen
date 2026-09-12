@@ -28,11 +28,11 @@
 |---|---|
 | `index_schedules.py` | 七种任务索引算法的 Python 实现 + 三条不变量校验 |
 | `draw_case.py` | 用 `scripts/seeten_draw.py` 画出案例页 |
-| `out/case.pptx` | 生成的页面 |
+| `out/v4-index-schedules.pptx` | 生成的页面（15 页：总览 + 7 种方法 x 2） |
 
 ```bash
 python index_schedules.py          # 先看七种算法的校验结果（应全为 0 冲突）
-python draw_case.py out/case.pptx  # 生成页面
+python draw_case.py out/v4-index-schedules.pptx   # 生成页面
 ```
 
 ## 七种索引算法
