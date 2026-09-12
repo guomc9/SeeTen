@@ -11,6 +11,7 @@ description: 用原生 PPT 表格当"张量画布"画张量分块与任务调度
 
 ```
 SeeTen/
+  README.md / README.zh-CN.md   # 安装与使用（英文为主，中文见 .zh-CN）
   SKILL.md                      # 你正在读的入口
   references/
     style-spec.md               # 实测风格规范：画布/色板/字体/几何/表式原型
@@ -24,6 +25,7 @@ SeeTen/
     color-sets.json             # lane 配色预设 + 伪代码块配色
   examples/
     demo.pptx                   # 通用演示（由 seeten_draw.py 的 demo() 生成）
+  cases/                        # 案例：用这套规范画出来的真实方案页
 ```
 
 ## 什么时候用它

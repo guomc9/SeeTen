@@ -1,67 +1,80 @@
-# 案例：确定性梯度累加的任务调度图
+# Case study: schedule pages for deterministic gradient accumulation
 
-这是一个用 SeeTen 规范画的**真实方案页**案例：某个 Ascend FA 反向算子的
-"确定性梯度累加"方案 —— 反向计算里一个 dK/dV 块的梯度由沿 S1 方向的多个分块累加而成，
-这些分块分给不同核并行算；非确定实现里各核算完直接原子加，谁先谁后由硬件调度决定，
-浮点加法又不满足结合律，于是每次运行结果可能不同。
+**English** | [中文](README.zh-CN.md)
 
-方案走的是**事前调度**路线：先排好任务，让一条核在连续多轮内独占一条 KV 列、
-在列内旋转 S1，于是 dK/dV 由单核按程序序累加，天然确定。
+A **real scheme page** case study drawn with the SeeTen conventions: the "deterministic gradient
+accumulation" scheme of an Ascend FA backward kernel. In the backward pass, the gradient of one
+dK/dV tile is accumulated from several tiles along the S1 axis, and those tiles are spread across
+cores to be computed in parallel. A non-deterministic implementation lets every core do an
+atomic add into shared memory as soon as it finishes — who adds first is decided by the hardware
+scheduler, and floating-point addition is not associative, so results can differ between runs.
 
-## 这个案例演示了什么
+This scheme takes the **schedule-first** route: assign tasks up front so that one core owns a
+single KV column for several consecutive rounds and rotates S1 inside it. dK/dV are then
+accumulated by a single core in program order, which makes the result deterministic by
+construction.
 
-| 通用手法 | 在本案例里的体现 |
+## What this case demonstrates
+
+| General technique | How it shows up here |
 |---|---|
-| 用表格当张量画布 | 块网格：格子 = 分块，颜色 = 归属，格内 = 块号 |
-| 任务矩阵（轮 × 核） | 行 = 第 N 轮，列 = C1..Ck，格内写 `S1=2  S2=3` 这样的轴索引 |
-| 覆盖图（S1×S2 平面） | 位置即坐标，格内写"第几轮执行"，颜色 = 哪条核；轴用箭头标 |
-| 伪代码先行 | 每页先给一段用具体名字写的伪代码，再给例子 |
-| 空白处补辅助表 | 对比表（同一形状下别的规则能不能用）、代价数字、每核负责的列 |
-| 归属标记钉在表上 | `B=1`、`N2=1`、`G=1` 只占自己那张图的宽度并紧贴其上 |
-| 配色预设 | lane 色组区分核，`hole` 灰表示该轮该核空闲 |
+| Table as a tensor canvas | Tile grid: cells are tiles, color is ownership, cell text is the tile id |
+| Task matrix (rounds × cores) | Rows are rounds, columns are C1..Ck, cells read `S1=2  S2=3` |
+| Coverage grid on the (S1, S2) plane | Position is the coordinate, cell text is the round, color is the core; axes marked with arrows |
+| Pseudocode first | Every page leads with pseudocode written with concrete names, then the example |
+| Fill whitespace with real tables | Comparison table (which rule applies to this shape), cost numbers, per-core column list |
+| Ownership labels hug their table | `B=1`, `N2=1`, `G=1` span only their own grid and sit right on top of it |
+| Color presets | Lane color set distinguishes cores; `hole` gray marks an idle (round, core) slot |
 
-## 文件
+## Files
 
-| 文件 | 说明 |
+| File | Purpose |
 |---|---|
-| `index_schedules.py` | 七种任务索引算法的 Python 实现 + 三条不变量校验 |
-| `draw_case.py` | 用 `scripts/seeten_draw.py` 画出案例页 |
-| `out/case.pptx` | 生成的页面 |
+| `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
+| `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
+| `out/case.pptx` | The generated pages |
 
 ```bash
-python index_schedules.py          # 先看七种算法的校验结果（应全为 0 冲突）
-python draw_case.py out/case.pptx  # 生成页面
+python index_schedules.py          # check the seven algorithms first (expect zero conflicts)
+python draw_case.py out/case.pptx  # generate the pages
 ```
 
-## 七种索引算法
+## The seven index algorithms
 
-输入都是"第几轮 + 哪条核"，输出"这一轮这条核算哪一块"（批 / 头 / 组 / S1 / S2）。
-它们是纯标量整数运算 —— 同一 (轮, 核) 每次结果相同，这就是确定性的来源。
+Each takes "which round + which core" and returns "which tile that core computes this round"
+(batch / head / group / S1 / S2). They are pure scalar integer arithmetic — the result for a
+given (round, core) is always the same, which is exactly where determinism comes from.
 
-| # | 算法 | 一句话 | 例子规模 | 结果 |
+| # | Algorithm | In one sentence | Example size | Result |
 |---|---|---|---|---|
-| 1 | 列私有 swizzle | 低位取 KV 列：一条核在 m 轮内独占一条列，列内旋转 S1 | k=2, 3×3 块, 2 批 | 9 轮铺满，每核 3 列 |
-| 2 | 批优先旋转 | 低位取批：同轮各核落在不同批上，核数可超过 S1 块数 | k=4, 2×2 块, 2 批 | 2 轮铺满 |
-| 3 | 因果折叠 | 两个相邻批拼成一个满矩形，两个三角正好凑满 | k=2, 3×3 块, 2 批 | 12 任务零空泡 |
-| 4 | 左上因果折叠 | S1 比 S2 长时的独立几何，虚拟高 = 2m-n+1 | k=2, 3×2 块, 2 批 | 10 任务，4 个要 mask |
-| 5 | GQA 切片 | 一条核独占 R 个连续任务号，gcd 修正让同轮键不撞 | k=2, 2×2 块, 组 2 | 4 轮 8 任务 |
-| 6 | 变长列私有 | 逐批 round 前缀，批内列私有；各批轮数可以不同 | k=2, 长度不等 | 12 任务 + 2 空泡 |
-| 7 | 变长展平 | 按面积前缀展平后等分成 k 段，每段顺序扫 | k=2, 组 2 | 12 任务零空泡 |
+| 1 | Column-private swizzle | Low digit is the KV column: one core owns a column for m rounds and rotates S1 inside it | k=2, 3×3 tiles, 2 batches | 9 rounds, filled; 3 columns per core |
+| 2 | Batch-first rotation | Low digit is the batch: cores land on different batches in the same round, so core count may exceed the S1 tile count | k=4, 2×2 tiles, 2 batches | filled in 2 rounds |
+| 3 | Causal folding | Two adjacent batches are folded into one full rectangle; the two triangles fit exactly | k=2, 3×3 tiles, 2 batches | 12 tasks, zero idle slots |
+| 4 | Left-up causal folding | Its own geometry when S1 is longer than S2; virtual height = 2m-n+1 | k=2, 3×2 tiles, 2 batches | 10 tasks, 4 need masking |
+| 5 | GQA slicing | One core owns R consecutive task ids; a gcd correction keeps same-round keys distinct | k=2, 2×2 tiles, group 2 | 4 rounds, 8 tasks |
+| 6 | Ragged column-private | Per-batch round prefix; column-private inside a batch; batches may need different round counts | k=2, unequal lengths | 12 tasks + 2 idle |
+| 7 | Ragged flattening | Flatten by area prefix, split into k slices, scan each in order | k=2, group 2 | 12 tasks, zero idle |
 
-## 校验的三条不变量
+## The three invariants checked
 
-`index_schedules.py` 的 `check()` 会对每个例子检查：
+`check()` in `index_schedules.py` verifies, for every example:
 
-1. **任务不重复**：同一个 (批, 头, 组, S1, S2) 不会被两个 (轮, 核) 产出；
-2. **同一轮 S1 不撞**：同一轮里没有两条核写同一个输出分块 —— 跨核原子加要有序就靠这条；
-3. **列私有**（swizzle 类）：一条核在连续若干轮里独占同一条列，列内 S1 不重复地转完。
+1. **No duplicate tasks** — the same (batch, head, group, S1, S2) is never produced by two
+   (round, core) pairs;
+2. **No S1 collision within a round** — no two cores write the same output tile in the same
+   round, which is what allows the cross-core atomic add to be ordered;
+3. **Column-private** (swizzle-style algorithms) — a core owns one column across consecutive
+   rounds and rotates S1 inside it without repetition.
 
-七种算法在上表规模下**全部通过**（重复 0、冲突 0）。变长展平（GQA 类）不做列私有 ——
-它靠展平切片 + 轮内键互不相同来保证顺序，这是设计选择，不是缺陷。
+All seven pass at the sizes above (0 duplicates, 0 conflicts). The GQA-style variants (5 and 7)
+are deliberately *not* column-private: they rely on flattened slicing plus distinct same-round
+keys instead. That is a design choice, not a defect.
 
-## 已知的坑
+## Known pitfalls
 
-- 案例里第 4 种算法（左上因果折叠）的 `m > n` 分支，**当前选择器其实不会选中它**
-  （只在 S1 与 S2 等长时选它，那条路径会委托给第 3 种）。页面上对此有注记，别误当成线上路径。
-- 参考的实现里，"参与块数 = 1 时跳过归约"这类快捷路径**并不存在**（一律 seed→归约→单次原子加），
-  画图时不要照抄想象中的优化。
+- For algorithm 4 (left-up causal folding), the `m > n` branch is **never selected by the
+  current selector** — it is only chosen when S1 and S2 are the same length, and that path
+  delegates to algorithm 3. The page says so explicitly; don't mistake it for a live code path.
+- Shortcuts such as "skip the reduction when only one tile contributes" **do not exist** in the
+  reference implementation (it always goes seed → reduce → single atomic add). Don't copy an
+  imagined optimization into a diagram.

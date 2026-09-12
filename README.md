@@ -1,34 +1,38 @@
-# SeeTen —— 张量表格绘制
+# SeeTen — Tensor Table Drawing
 
-把"分块 + 核 + 轮次"这类并行方案的逻辑画成 PPT 页面。
-核心手法：**原生 PPT 表格当张量画布** —— 一个单元格 = 一个分块，填充色编码语义，
-格内写清"是哪个轴的哪个索引"；再用伪代码块讲逻辑、用带箭头的连接线画数据流。
+**English** | [中文](README.zh-CN.md)
 
-它同时是一份**实测过的风格规范**：画布、色板、字体、几何全部有确切数值，
-按它画出来的页面观感统一，不会每页一个样。
+Turn the logic of "tiles + cores + rounds" parallel schemes into presentation pages.
+The core idea: **use native PPT tables as a tensor canvas** — one cell is one tile, the fill
+color encodes semantics, and the cell text states exactly which index of which axis it is.
+Pseudocode blocks explain the logic; arrowed connectors draw the dataflow.
+
+It is also a **measured style spec**: canvas size, palette, fonts and geometry all have exact
+values, so pages come out visually consistent instead of one-off.
 
 ```
 SeeTen/
-  SKILL.md                      # 技能入口：什么时候用、硬规则、怎么用
+  SKILL.md                      # Skill entry: when to use, hard rules, how to use
   references/
-    style-spec.md               # 实测风格规范：画布/色板/字体/几何/表式原型
-    diagram-recipes.md          # 各类图的画法配方 + 画前自检清单
+    style-spec.md               # Measured style spec: canvas / palette / fonts / geometry / table archetypes
+    diagram-recipes.md          # Recipes for each diagram type + pre-flight checklist
   scripts/
-    seeten_draw.py              # python-pptx 生成库（核心）
-    verify_demo.py              # 回读生成结果自检（表样式/边框/字体）
-    render_deck.ps1             # 把 pptx 导成 PNG，供逐页看图改版式
+    seeten_draw.py              # python-pptx generation library (the core)
+    verify_demo.py              # Read the deck back and self-check (table style / borders / fonts)
+    render_deck.ps1             # Export pptx to PNG so pages can be reviewed visually
   assets/
-    palette.json                # 实测色板与几何常量（EMU 原值）
-    color-sets.json             # lane 配色预设 + 伪代码块配色
-  examples/demo.pptx            # 通用演示（2 页）
-  cases/                        # 案例：用这套手法画出来的真实方案页
+    palette.json                # Measured palette and geometry constants (raw EMU)
+    color-sets.json             # Lane color presets + pseudocode block colors
+  examples/demo.pptx            # Generic demo (2 pages)
+  cases/                        # Case studies: real scheme pages drawn with these rules
 ```
 
 ---
 
-## 1. 环境准备
+## 1. Requirements
 
-只需要 **Python + python-pptx**（渲染预览那步额外需要 WPS 或 LibreOffice，见 §4）。
+You only need **Python + python-pptx**. The render-and-review step additionally needs
+WPS Office or LibreOffice (see §4).
 
 ```bash
 python -m venv .venv
@@ -38,137 +42,147 @@ python -m venv .venv
 .venv/bin/python -m pip install python-pptx
 ```
 
-可选：`pillow`（看渲染出来的 PNG 时方便），`lxml`（python-pptx 的依赖，会自动装）。
+Optional: `pillow` (handy when inspecting the rendered PNGs). `lxml` is a python-pptx
+dependency and is installed automatically.
 
-## 2. 安装到常用 agent CLI
+## 2. Installing into common agent CLIs
 
-这个 skill 是**文件目录形态**的：不绑定任何 CLI，只要那个 CLI 能读文件、能跑 Python 就能用。
-所以"安装"= 让 agent 知道 `SKILL.md` 在哪，并允许它执行 `scripts/` 下的脚本。
+This skill is **just a directory**. It is not tied to any CLI: any agent that can read files
+and run Python can use it. "Installing" therefore means *pointing the agent at `SKILL.md`*
+and letting it execute the scripts under `scripts/`.
 
-### 2.1 Claude Code（原生 skill 机制）
+### 2.1 Claude Code (native skill mechanism)
 
-Claude Code 会把 `<项目>/.claude/skills/<名字>/SKILL.md` 和
-`~/.claude/skills/<名字>/SKILL.md` 自动识别为 skill。**目录名必须与 `SKILL.md` 里的
-`name` 一致，且只能用小写字母、数字、连字符**，所以安装时把目录名改成 `seeten-draw`：
+Claude Code auto-discovers `<project>/.claude/skills/<name>/SKILL.md` and
+`~/.claude/skills/<name>/SKILL.md`. **The directory name must match `name` in `SKILL.md`
+and may only contain lowercase letters, digits and hyphens**, so install it as `seeten-draw`:
 
 ```bash
-# 项目级（跟着仓库走）
+# Project-level (travels with the repo)
 mkdir -p .claude/skills
 cp -r /path/to/SeeTen .claude/skills/seeten-draw
 
-# 个人级（所有项目都能用）
+# Personal-level (available in every project)
 # Windows
 xcopy /E /I SeeTen "%USERPROFILE%\.claude\skills\seeten-draw"
 # macOS / Linux
 cp -r SeeTen ~/.claude/skills/seeten-draw
 ```
 
-装好后：直接说需求（"帮我画一页 xxx 的分块调度图"）会被自动匹配；
-也可以显式调用 `/seeten-draw`。
+After that, just describe what you want ("draw me a tile-schedule page for ...") and it will be
+matched automatically, or invoke it explicitly with `/seeten-draw`.
 
-> 只想保持 `SeeTen` 这个目录名也行 —— 那样不会被自动发现，但可以让 agent 直接读
-> `SeeTen/SKILL.md`，效果一样。
+> Keeping the directory named `SeeTen` is fine too — it simply won't be auto-discovered, but you
+> can always tell the agent to read `SeeTen/SKILL.md` directly. The effect is the same.
 
-### 2.2 Codex / OpenCode 等以 `AGENTS.md` 为指令文件的 CLI
+### 2.2 Codex / OpenCode and other CLIs driven by `AGENTS.md`
 
-这类 CLI 会读项目根目录的 `AGENTS.md`。在 `AGENTS.md` 里加一段指路：
+These CLIs read an instruction file at the repository root. Add a pointer to `AGENTS.md`:
 
 ```markdown
-## 绘图规范（SeeTen）
+## Drawing conventions (SeeTen)
 
-画张量/分块/调度类示意图、PPT 页面时，先读 `SeeTen/SKILL.md` 并遵守其中的硬规则；
-风格参数一律从 `SeeTen/assets/*.json` 与 `SeeTen/references/style-spec.md` 取。
-生成脚本用 `SeeTen/scripts/seeten_draw.py`（需要 python-pptx）。
+Before drawing tensor / tiling / scheduling diagrams or presentation pages, read
+`SeeTen/SKILL.md` and follow its hard rules. Take style parameters only from
+`SeeTen/assets/*.json` and `SeeTen/references/style-spec.md`.
+Generate pages with `SeeTen/scripts/seeten_draw.py` (requires python-pptx).
 ```
 
-### 2.3 Kimi Code 及其他 CLI
+### 2.3 Kimi Code and other CLIs
 
-同一个套路：把你那个 CLI 的"项目指令文件"指向上面的片段即可。
-不同 CLI 的指令文件名不一样（`AGENTS.md`、`KIMI.md`、`CLAUDE.md` 等），
-先看它的文档或 `--help` 确认；实在没有指令文件机制，就在对话里直接说：
+Same pattern: point that CLI's project instruction file at the snippet above.
+Instruction file names differ between tools (`AGENTS.md`, `KIMI.md`, `CLAUDE.md`, ...), so check
+your CLI's docs or `--help` first. If it has no instruction-file mechanism at all, just say in
+the conversation:
 
 ```
-读 SeeTen/SKILL.md，按它的规范和脚本画一页 xxx。
+Read SeeTen/SKILL.md and draw a page for xxx following its conventions.
 ```
 
-**通用兜底**：任何 agent CLI，只要把 `SKILL.md` 的内容贴进上下文、并允许它调用
-`scripts/seeten_draw.py`，就能完整使用本 skill。
+**Universal fallback**: any agent CLI can use this skill in full by putting the contents of
+`SKILL.md` into context and allowing it to call `scripts/seeten_draw.py`.
 
-### 2.4 直接用（不经过 agent）
+### 2.4 Using it directly (no agent)
 
 ```bash
-python scripts/seeten_draw.py examples/demo.pptx   # 生成演示 deck
-python scripts/verify_demo.py examples/demo.pptx   # 回读自检
+python scripts/seeten_draw.py examples/demo.pptx   # build the demo deck
+python scripts/verify_demo.py examples/demo.pptx   # read it back and self-check
 ```
 
-## 3. 快速上手
+## 3. Quick start
 
 ```python
 import sys; sys.path.insert(0, "SeeTen/scripts")
 from seeten_draw import *
 
-prs = new_deck("4:3")            # 画布比例先定，之后不改
+prs = new_deck("4:3")            # pick the canvas ratio first, never change it later
 s = blank_slide(prs)
-title(s, "分块与轮次")
-text(s, 0.73, 1.22, "输入：核数 2 · S1 分 3 块 · S2 分 3 块", size=16, w=13)
+title(s, "Tiles and rounds")
+text(s, 0.73, 1.22, "input: 2 cores, 3x3 tiles", size=16, w=13)
 
-block_grid(s, 1.0, 3.0, fills, labels)                 # 块网格
-task_matrix(s, 0.73, 6.0, ["C1", "C2"], rows)          # 任务矩阵：轮 x 核
-pseudocode_block(s, 0.73, 1.7, 9.6, ["对每个 (轮 r, 核 j):", "    ..."])
-note(s, 0.73, 10.4, "顺序固定，结果就固定。")
+block_grid(s, 1.0, 3.0, fills, labels)                 # tile grid
+task_matrix(s, 0.73, 6.0, ["C1", "C2"], rows)          # task matrix: rounds x cores
+pseudocode_block(s, 0.73, 1.7, 9.6, ["for each (round r, core j):", "    ..."])
+note(s, 0.73, 10.4, "The order is fixed, so the result is fixed.")
 
 save(prs, "out.pptx")
-print(check_layout(prs))         # 收尾必须 0 越界 0 重叠
+print(check_layout(prs))         # must end with 0 out-of-bounds and 0 overlaps
 ```
 
-主要 API：
+Main API:
 
-| 构件 | 用途 |
+| Building block | Purpose |
 |---|---|
-| `new_deck(preset)` / `blank_slide` / `save` | 画布（`4:3` / `16:9` / `16:10`） |
-| `title` / `text` / `subtitle` / `note` | 标题、正文、图注（中英自动分 run 设字体） |
-| `block_grid` / `tensor_block` | 块网格、单个分块 |
-| `spec_table` / `round_table` / `accum_table` / `gantt_table` | 各类表格原型 |
-| `task_matrix` | 任务矩阵（**行 = 轮，列 = 核**） |
-| `axis_grid` | 带轴头的 (S1, S2) 覆盖图 |
-| `pseudocode_block` | 伪代码块 |
-| `panel` | 带表外标题的小表（填空白用：对比/数字/中间形态） |
-| `arrow` / `axis_arrow` | 连接线、轴箭头 |
-| `lane_colors` / `text_on` | lane 配色预设、按底色亮度自动选字色 |
-| `check_layout` | 版心硬检查（文字按实际占位、表格按真实框） |
+| `new_deck(preset)` / `blank_slide` / `save` | Canvas (`4:3` / `16:9` / `16:10`) |
+| `title` / `text` / `subtitle` / `note` | Titles, body text, captions (CJK/Latin runs get separate fonts automatically) |
+| `block_grid` / `tensor_block` | Tile grid / single tile |
+| `spec_table` / `round_table` / `accum_table` / `gantt_table` | Table archetypes |
+| `task_matrix` | Task matrix (**rows = rounds, columns = cores**) |
+| `axis_grid` | (S1, S2) coverage grid with axis headers |
+| `pseudocode_block` | Pseudocode block |
+| `panel` | Small captioned table (fills whitespace: comparison / numbers / intermediate form) |
+| `arrow` / `axis_arrow` | Connectors / axis arrows |
+| `lane_colors` / `text_on` | Lane color presets / pick text color from fill luminance |
+| `check_layout` | Hard bounds check (text by real extent, tables by real width/height) |
 
-## 4. 渲染回看（强烈建议）
+## 4. Render and review (strongly recommended)
 
-数字检查（`check_layout`）只能保证"没越界、没重叠"，**版式好不好看必须看图**：
+Numeric checks (`check_layout`) only prove "nothing is out of bounds and nothing overlaps".
+**Whether the layout actually looks good requires looking at it:**
 
 ```powershell
-# 需要本机装了 WPS（用它的 COM 接口）
+# Needs WPS Office installed (uses its COM interface)
 powershell -File scripts\render_deck.ps1 examples\demo.pptx
-# 装了 LibreOffice 的话
-soffice --headless --convert-to png --outdir <目录> examples\demo.pptx
+# Or, with LibreOffice
+soffice --headless --convert-to png --outdir <dir> examples\demo.pptx
 ```
 
-导出的 PNG 放在 pptx 同级的 `_render\`，逐页看一眼再调版式。
+The PNGs land in `_render\` next to the pptx. Look through them page by page before adjusting.
 
-## 5. 硬规则（用之前先读）
+## 5. Hard rules (read before you draw)
 
-完整版在 `SKILL.md`，最容易踩的几条：
+The full list is in `SKILL.md`. The ones that bite most often:
 
-1. **画布先定，内容不许越界**：四边留 0.6 in，收尾跑 `check_layout`，0 越界 0 重叠才算完。
-2. **不留大块空白**，空处补对比表 / 代价数字表 / 中间形态图，不要拿废话填。
-3. **每页都要有标题**；有子标题就放标题下方、字号更小。
-4. **表格的归属标记要紧贴自己的表**（只占自己表格的宽度 + 一小段竖线钉住）。
-5. **讲逻辑不给代码位置**：例子前先放伪代码块；页面上不出现文件名/行号。
-6. **表项写清轴的索引**（`S1=2 S2=3`），不要写逗号分隔的裸数字。
-7. **任务矩阵行是轮、列是核**。
-8. **浅底不要写白字** —— 块内字色交给 `text_on(fill)` 自动选。
+1. **Pick the canvas ratio first; nothing may cross the content box.** Keep 0.6 in on all four
+   sides, run `check_layout` at the end — 0 out-of-bounds and 0 overlaps or it is not done.
+2. **No large empty areas.** Fill them with comparison tables, cost numbers, or an intermediate
+   form of the data — never with filler prose.
+3. **Every page needs a title**; if there is a subtitle, put it below the title at a smaller size.
+4. **A table's ownership label must hug its own table** (span only that table's width, plus a
+   short tick line pinning it down).
+5. **Explain the logic, don't cite code.** Put a pseudocode block before each example; no file
+   names or line numbers on the page.
+6. **Cell values must name the axis index** (`S1=2 S2=3`), not bare comma-separated numbers.
+7. **Task matrices put rounds on rows and cores on columns.**
+8. **Never use white text on a light fill** — let `text_on(fill)` choose the text color.
 
-## 6. 案例
+## 6. Cases
 
-`cases/flash-attention-det-accum/` —— 一个真实方案（Ascend FA 反向算子的确定性梯度累加）
-的调度图案例：七种任务索引算法的 Python 实现 + 不变量校验 + 绘制脚本。
-它演示了上面这套规范在"轮次 × 核 × 分块"这类问题上的完整用法。
+`cases/flash-attention-det-accum/` — a real scheme (deterministic gradient accumulation for an
+Ascend FA backward kernel) drawn as schedule pages: Python implementations of seven task-index
+algorithms, invariant checks, the drawing script, and the output pages. It demonstrates the
+whole convention on a "rounds x cores x tiles" problem.
 
-## 7. 许可
+## 7. License
 
-内部资料，未附开源许可；使用前请与作者确认。
+Internal material; no open-source license attached. Please check with the author before use.
