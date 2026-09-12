@@ -12,6 +12,7 @@ description: 用原生 PPT 表格当"张量画布"画张量分块与任务调度
 ```
 SeeTen/
   README.md / README.zh-CN.md   # 安装与使用（英文为主，中文见 .zh-CN）
+  package.json / bin/ / lib/    # npm CLI `seeten`：装 skill + 备 Python 依赖（零 npm 依赖）
   SKILL.md                      # 你正在读的入口
   references/
     style-spec.md               # 实测风格规范：画布/色板/字体/几何/表式原型
@@ -36,6 +37,9 @@ SeeTen/
 
 ## 怎么用
 
+0. **环境（第一次用才需要）**：`npx github:guomc9/SeeTen init` —— 一条命令把 skill 装到
+   agent CLI 的目录、并在 `~/.seeten/venv` 备好 python-pptx。装完用 `seeten doctor` 自检。
+   环境就绪后，绘制脚本统一用 `seeten draw <脚本.py> <输出.pptx>` 跑（它会自动挂好环境）。
 1. **先读规则**：`references/style-spec.md` 定死了画布、版心、色板、字号、表式；
    `references/diagram-recipes.md` 开头是通用规则，后面是各类图的配方。
 2. **选配方**：从 `diagram-recipes.md` 挑最接近的一张，照它的坐标和表式画。
@@ -54,13 +58,17 @@ SeeTen/
    save(prs, "out.pptx")
    ```
    ```powershell
-   & <venv>\Scripts\python.exe scripts\seeten_draw.py examples\demo.pptx   # 通用演示
-   & <venv>\Scripts\python.exe scripts\verify_demo.py examples\demo.pptx   # 回读自检
+   seeten draw --demo examples\demo.pptx    # 通用演示（用提前备好的环境）
+   seeten render examples\demo.pptx         # 导出 PNG 逐页看图
+   seeten doctor                            # 环境出问题时先跑这个
    ```
+   没装 CLI 的话，等价的手工命令是 `python scripts\seeten_draw.py examples\demo.pptx`
+   （需先 `pip install python-pptx`）。
 5. **自检**：跑 `verify_demo.py` 确认表样式已剥离、边框/字体/CJK 字体在位。
 6. **渲染看一眼（必做，别只靠数字判断版式）**：
    ```powershell
-   powershell -File scripts\render_deck.ps1 examples\demo.pptx
+   seeten render examples\demo.pptx
+   # 或直接用脚本：powershell -File scripts\render_deck.ps1 examples\demo.pptx
    ```
    它用本机 WPS 的 COM 接口（`KWPP.Application`）把每页导成 PNG 到同级 `_render\`，
    然后用 Read 工具**逐页看图**改版式 —— 空白是否过多、标记是否贴错表、字号是否被挤，
