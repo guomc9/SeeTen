@@ -11,6 +11,8 @@
 
 ```
 SeeTen/
+  package.json / bin/ / lib/    # npm CLI `seeten`：装 skill + 备 Python 依赖
+                                #   （零 npm 依赖，只用 Node 内置模块）
   SKILL.md                      # 技能入口：什么时候用、硬规则、怎么用
   references/
     style-spec.md               # 实测风格规范：画布/色板/字体/几何/表式原型
@@ -28,9 +30,43 @@ SeeTen/
 
 ---
 
-## 1. 环境准备
+## 1. 安装（一条命令）
 
-只需要 **Python + python-pptx**（渲染预览那步额外需要 WPS 或 LibreOffice，见 §4）。
+```bash
+npx github:guomc9/SeeTen init
+```
+
+这一条命令会：
+
+- 把 skill 装到你的 agent CLI 的 skill 目录（自动识别 `.claude/`、`AGENTS.md`、`CLAUDE.md`、`KIMI.md`）；
+- 备好 `python-pptx` —— 系统 Python 已经装了就直接复用，没装就在 `~/.seeten/venv`
+  建独立环境（**不动你的系统环境**）；
+- 生成一份演示 deck 并跑版心自检，有问题当场就能看到；
+- 报告 PNG 导出（WPS / LibreOffice）能不能用，也就是"渲染看图"这步可不可行。
+
+机器上需要 **Node 18+** 和 **Python 3.8+**，其余都由它处理。
+不需要 npm 账号、不需要先发布 —— `npx github:` 直接从仓库装。
+
+| 命令 | 作用 |
+|---|---|
+| `seeten init [--global] [--no-demo]` | 装 skill + 备 Python 依赖 + 冒烟测试 |
+| `seeten draw <脚本.py> [输出.pptx]` | 用同一套环境跑你的绘制脚本 |
+| `seeten draw --demo [输出.pptx]` | 生成通用演示 deck |
+| `seeten render <文件.pptx>` | 导出 PNG，逐页看版式 |
+| `seeten doctor` | 自检：装了什么、还缺什么 |
+
+`seeten draw` 会把 skill 的 `scripts/` 挂到 `PYTHONPATH` 上，所以你的脚本只要写
+`from seeten_draw import *` 就行。
+
+## 2. 手动安装（各 CLI 细节）
+
+上面那条命令是推荐路径。这一节是它替你做的事 —— 如果你想自己接线，或者用的是比较特别的
+CLI，就看这里。
+
+这个 skill 是**文件目录形态**的：不绑定任何 CLI，只要那个 CLI 能读文件、能跑 Python 就能用。
+所以"安装"= 让 agent 知道 `SKILL.md` 在哪，并允许它执行 `scripts/` 下的脚本。
+
+手工装的话，Python 那边也要自己准备：
 
 ```bash
 python -m venv .venv
@@ -39,13 +75,6 @@ python -m venv .venv
 # macOS / Linux
 .venv/bin/python -m pip install python-pptx
 ```
-
-可选：`pillow`（看渲染出来的 PNG 时方便）。`lxml` 是 python-pptx 的依赖，会自动装。
-
-## 2. 安装到常用 agent CLI
-
-这个 skill 是**文件目录形态**的：不绑定任何 CLI，只要那个 CLI 能读文件、能跑 Python 就能用。
-所以"安装"= 让 agent 知道 `SKILL.md` 在哪，并允许它执行 `scripts/` 下的脚本。
 
 ### 2.1 Claude Code（原生 skill 机制）
 

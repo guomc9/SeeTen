@@ -1,0 +1,36 @@
+{
+  "name": "seeten",
+  "version": "0.1.0",
+  "description": "SeeTen — draw tensor/tile scheduling diagrams into PPTX pages. Installs the SeeTen skill into your agent CLI and provisions its Python engine.",
+  "bin": {
+    "seeten": "bin/seeten.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "SKILL.md",
+    "README.md",
+    "README.zh-CN.md",
+    "references/",
+    "scripts/",
+    "assets/",
+    "examples/",
+    "cases/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "skill",
+    "claude-code",
+    "pptx",
+    "tensor",
+    "diagram",
+    "scheduling"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guomc9/SeeTen.git"
+  },
+  "license": "UNLICENSED"
+}

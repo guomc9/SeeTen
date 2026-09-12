@@ -12,6 +12,8 @@ values, so pages come out visually consistent instead of one-off.
 
 ```
 SeeTen/
+  package.json / bin/ / lib/    # npm CLI `seeten` — installs this skill and its Python deps
+                                #   (zero npm dependencies: Node built-ins only)
   SKILL.md                      # Skill entry: when to use, hard rules, how to use
   references/
     style-spec.md               # Measured style spec: canvas / palette / fonts / geometry / table archetypes
@@ -29,10 +31,45 @@ SeeTen/
 
 ---
 
-## 1. Requirements
+## 1. Install (one command)
 
-You only need **Python + python-pptx**. The render-and-review step additionally needs
-WPS Office or LibreOffice (see §4).
+```bash
+npx github:guomc9/SeeTen init
+```
+
+That single command:
+
+- installs the skill into your agent CLI's skill directory (auto-detects `.claude/`,
+  `AGENTS.md`, `CLAUDE.md`, `KIMI.md`);
+- provisions `python-pptx` — reuses your system Python if it already has it, otherwise creates
+  an isolated venv at `~/.seeten/venv` (your system environment is never modified);
+- generates a demo deck and runs the layout self-check, so problems surface immediately;
+- reports whether PNG export (WPS / LibreOffice) is available for visual review.
+
+You need **Node 18+** and **Python 3.8+** on the machine; everything else is handled for you.
+No npm account or publish step is involved — `npx github:` installs straight from the repository.
+
+| Command | What it does |
+|---|---|
+| `seeten init [--global] [--no-demo]` | install the skill + provision Python deps + smoke test |
+| `seeten draw <script.py> [out.pptx]` | run your drawing script in the provisioned environment |
+| `seeten draw --demo [out.pptx]` | generate the generic demo deck |
+| `seeten render <file.pptx>` | export PNGs so you can review the layout visually |
+| `seeten doctor` | report what is installed and what is missing |
+
+`seeten draw` puts the skill's `scripts/` on `PYTHONPATH`, so your script only needs
+`from seeten_draw import *`.
+
+## 2. Manual installation (per-CLI details)
+
+The CLI above is the recommended path. This section is what it automates — useful if you
+would rather wire things up by hand, or need the details for an unusual CLI.
+
+This skill is **just a directory**. It is not tied to any CLI: any agent that can read files
+and run Python can use it. "Installing" therefore means *pointing the agent at `SKILL.md`*
+and letting it execute the scripts under `scripts/`.
+
+To do it by hand you also need the Python side:
 
 ```bash
 python -m venv .venv
@@ -42,14 +79,7 @@ python -m venv .venv
 .venv/bin/python -m pip install python-pptx
 ```
 
-Optional: `pillow` (handy when inspecting the rendered PNGs). `lxml` is a python-pptx
-dependency and is installed automatically.
-
-## 2. Installing into common agent CLIs
-
-This skill is **just a directory**. It is not tied to any CLI: any agent that can read files
-and run Python can use it. "Installing" therefore means *pointing the agent at `SKILL.md`*
-and letting it execute the scripts under `scripts/`.
+### 2.0 If you installed with the CLI, you can stop here
 
 ### 2.1 Claude Code (native skill mechanism)
 
