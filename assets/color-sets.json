@@ -1,0 +1,64 @@
+{
+  "_note": "lane 配色预设：按核号顺序取用，每色自带文字色，避免浅底压白字。由 scripts/seeten_draw.py 的 lane_colors() 读取。",
+  "lane_sets": {
+    "deck": {
+      "_note": "高对比四色（深底白字），投屏远看时用这套",
+      "colors": [
+        { "fill": "#3370FF", "text": "#FFFFFF" },
+        { "fill": "#6425D0", "text": "#FFFFFF" },
+        { "fill": "#D83931", "text": "#FFFFFF" },
+        { "fill": "#AD82F7", "text": "#FFFFFF" },
+        { "fill": "#82A7FC", "text": "#1F2329" },
+        { "fill": "#F98E8B", "text": "#1F2329" }
+      ]
+    },
+    "cool": {
+      "_note": "默认。低饱和冷色，2~6 条 lane 都好读，白色文字对比度足够",
+      "colors": [
+        { "fill": "#4E7CF0", "text": "#FFFFFF" },
+        { "fill": "#7A5AF8", "text": "#FFFFFF" },
+        { "fill": "#2FA8A0", "text": "#FFFFFF" },
+        { "fill": "#5B8FF9", "text": "#FFFFFF" },
+        { "fill": "#6B7A99", "text": "#FFFFFF" },
+        { "fill": "#9467BD", "text": "#FFFFFF" }
+      ]
+    },
+    "clay": {
+      "_note": "暖色组，浅底配深字，打印和投影都柔和",
+      "colors": [
+        { "fill": "#E07A5F", "text": "#FFFFFF" },
+        { "fill": "#81B29A", "text": "#1F2329" },
+        { "fill": "#F2B880", "text": "#1F2329" },
+        { "fill": "#A98467", "text": "#FFFFFF" },
+        { "fill": "#D98C8C", "text": "#1F2329" },
+        { "fill": "#6C757D", "text": "#FFFFFF" }
+      ]
+    },
+    "mist": {
+      "_note": "极简蓝灰，最安静的一组，适合正文页里夹着的调度图",
+      "colors": [
+        { "fill": "#5C7CFA", "text": "#FFFFFF" },
+        { "fill": "#748FFC", "text": "#FFFFFF" },
+        { "fill": "#9775FA", "text": "#FFFFFF" },
+        { "fill": "#4DABF7", "text": "#1F2329" },
+        { "fill": "#A5B4CB", "text": "#1F2329" },
+        { "fill": "#868E96", "text": "#FFFFFF" }
+      ]
+    }
+  },
+  "hole": {
+    "_note": "空洞 / 被 mask 的块",
+    "fill": "#F2F3F5",
+    "text": "#1F2329"
+  },
+  "pseudocode": {
+    "_note": "浅灰底 + 等宽字 + 注释灰 + 关键字蓝（实测值）",
+    "bg": "#F5F5F5",
+    "border": "#D6D6D6",
+    "text": "#333333",
+    "keyword": "#0086B3",
+    "comment": "#969896",
+    "font": "Consolas",
+    "fallback_font": "Courier New"
+  }
+}

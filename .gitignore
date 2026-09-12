@@ -1,0 +1,16 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ---------- 渲染产物：随时可用 scripts/render_deck.ps1 重生成 ----------
+**/_render/
+
+# ---------- 编辑器 / 系统 ----------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+~$*.pptx

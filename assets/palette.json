@@ -1,0 +1,79 @@
+{
+  "_source": "实测自一套 12 页的方案 deck（原生 shape，python-pptx 逐格量出），不是目测",
+  "canvas": {
+    "width_emu": 15240000,
+    "height_emu": 11430000,
+    "width_in": 16.666,
+    "height_in": 12.5,
+    "width_pt": 1200,
+    "height_pt": 900,
+    "aspect": "4:3",
+    "background": "#FFFFFF"
+  },
+  "block_groups": {
+    "_note": "累加组配色：组0/1/2 = 同一个输出块（dK 的 s2o、dQ 的 s1o）。用于块网格表、数据流图的块填充。",
+    "group0": "#3370FF",
+    "group1": "#82A7FC",
+    "group2": "#E1EAFF"
+  },
+  "operands": {
+    "_note": "操作数配色：同一张量在 L1/L0 各级暂存与块网格中保持同色；light/dark 用于区分同张量的两个半块（S1/S2 方向的第 0 块 vs 第 1 块）。",
+    "q": { "light": "#AD82F7", "dark": "#6425D0" },
+    "ds": { "light": "#F98E8B", "dark": "#D83931" },
+    "accum_l0c": "#3370FF",
+    "workspace_gm": "#3370FF",
+    "det_workspace_gm": "#3370FF"
+  },
+  "text": {
+    "title": "#1F2329",
+    "primary": "#1F2329",
+    "body": "#333333",
+    "strong": "#000000",
+    "on_block": "#FFFFFF",
+    "note_red": "#D83931"
+  },
+  "lines": {
+    "table_border": "#DDDEDF",
+    "table_border_w_emu": 12700,
+    "connector": "#2B2F36",
+    "connector_w_emu": 12700,
+    "connector_fill": "#DEE0E3"
+  },
+  "accents": {
+    "operation_blue": "#3370FF",
+    "operation_red": "#F98E8B",
+    "vector_orange": "#FFBA6B",
+    "highlight_tint": "#FDE2E2"
+  },
+  "fonts": {
+    "latin": "Times New Roman",
+    "cjk": "Noto Sans SC",
+    "body_stack": "Helvetica Neue, Helvetica, Segoe UI, Arial, freesans, sans-serif",
+    "mono": "monospace"
+  },
+  "sizes_pt": {
+    "slide_title": 30.0,
+    "section_header": 30.0,
+    "body": 16.0,
+    "annotation": 18.0,
+    "label": 20.0,
+    "round_marker": 32.0,
+    "block_label": 17.5,
+    "block_label_small": 13.5,
+    "axis_small": 14.0,
+    "aux_table": 17.5,
+    "spec_table": 15.5,
+    "gantt": 13.3
+  },
+  "grid": {
+    "cell_w_emu": 612885,
+    "cell_h_emu": 603250,
+    "cell_w_in": 0.670,
+    "cell_h_in": 0.660,
+    "block_patch": "2 cols x 2 rows = one fundamental block",
+    "cell_margin_left_emu": 101600,
+    "cell_margin_right_emu": 0,
+    "cell_margin_top_emu": 101600,
+    "cell_margin_bottom_emu": 101600
+  }
+}
