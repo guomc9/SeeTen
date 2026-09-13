@@ -140,7 +140,7 @@ def page_text(kind, shape, mr, kw):
             key="两个三角正好拼成一个 m 行 n+1 列的满矩形：没有 idle 槽位、也不用打 mask。",
             ex_sub="先看下面的虚拟矩形（两个三角拼成的满矩形），再对照上面两张真实的块图",
             read=["同一个格子在两张真实图上各出现一次（颜色不同 = batch 不同）。",
-                  "一条 core 在两个 batch 间来回切 → 每核要**两个累加 buffer**（parity 0/1）。"])
+                  "**灰格 = causal 区外**（打 mask，不参与累加）；一条 core 在两个 batch 间来回切 → 每核要**两个累加 buffer**。"])
     if kind == ix.KIND_LEFT_UP_CAUSAL:
         square = m <= n          # S1 = S2（或更短）时这条规则委托给方形折叠
         return dict(
@@ -936,7 +936,9 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
             tag = "" if len(heads) == 1 and shape.groupNum == 1 else \
                   f" N2={head[0] + 1} G={head[1] + 1}"
             sd.axis_grid(s, gx, gy, m, n, grid_cells(ts, b, head), f"B={b + 1}{tag}",
-                         lane_set=LANE_SET, cell_in=cell, shade_count=n_max)
+                         lane_set=LANE_SET, cell_in=cell, shade_count=n_max,
+                         empty_text="mask" if kind in (ix.KIND_CAUSAL_SWIZZLE,
+                                                       ix.KIND_LEFT_UP_CAUSAL) else "空闲")
             if first:
                 sd.axis_arrow(s, gx - 0.68, gy, (m + 1) * cell - cell * 0.6, "down", "S1")
                 sd.axis_arrow(s, gx, gy - 0.72, (n + 1) * cell - cell * 0.6, "right", "S2")
