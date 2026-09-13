@@ -382,8 +382,8 @@ def cases():
     out.append(("先分批再分列", KIND_DENSE_INDEX, s, 2, {}, False))
     s = Shape(batch=2, qSeqLen=384, kvSeqLen=384, qHeadNum=1, kvHeadNum=1, coreNum=2)
     out.append(("因果折叠", KIND_CAUSAL_SWIZZLE, s, 6, {}, True))
-    s = Shape(batch=2, qSeqLen=384, kvSeqLen=256, qHeadNum=1, kvHeadNum=1, coreNum=2)
-    out.append(("左上因果折叠", KIND_LEFT_UP_CAUSAL, s, 5, {}, True))
+    s = Shape(batch=2, qSeqLen=384, kvSeqLen=384, qHeadNum=1, kvHeadNum=1, coreNum=2)
+    out.append(("左上因果折叠（S1 = S2）", KIND_LEFT_UP_CAUSAL, s, 6, {}, True))
     s = Shape(batch=1, qSeqLen=256, kvSeqLen=256, qHeadNum=2, kvHeadNum=1,
               groupNum=2, coreNum=2)
     out.append(("GQA 切片", KIND_GQA_DENSE, s, 4, {}, False))

@@ -55,11 +55,19 @@ META = {
              "奇数列用 parity-0、偶数列用 parity-1 buffer → 一条核在两个 batch 间来回切。",
              "矩形是满的 → **没有 idle、也不用打 mask**。"]),
     ix.KIND_LEFT_UP_CAUSAL: dict(
-        en="Left-Up Causal", cn="左上对齐", low=lambda s, kw: "S2（虚拟）",
-        tags=lambda s, kw: [("layout", "BSND"), ("causal", "是，S1 > S2"),
-                            ("头型", "MHA (g=1)"), ("buffer", "2 个 (parity)")],
-        why=["S1 比 S2 长时换一套几何：**虚拟高 = 2m-n+1**，每列只有 m 行有活；",
-             "多出来的行是 idle；因果区外的块由 mask 打掉（贡献精确 0）。"]),
+        en="Left-Up Causal", cn="左上对齐",
+        low=lambda s, kw: "S2 列（同方形折叠）" if s.M() <= s.N() else "S2（虚拟）",
+        tags=lambda s, kw: [("layout", "BSND"),
+                            ("causal", "是，S1 = S2" if s.M() <= s.N() else "是，S1 > S2"),
+                            ("头型", "MHA (g=1)"),
+                            ("S1 = S2 时", "委托方形折叠" if s.M() <= s.N() else "用左上几何"),
+                            ("buffer", "2 个 (parity)")],
+        why=lambda s, kw: (
+            ["本例 S1 = S2（m <= n）→ **直接委托给方形折叠**，不启用左上几何；",
+             "所以分派结果和 4 节完全一样：**虚拟宽 = n+1**、零 idle、不用打 mask。"]
+            if s.M() <= s.N() else
+            ["S1 比 S2 长时换一套几何：**虚拟高 = 2m-n+1**，每列只有 m 行有活；",
+             "多出来的行是 idle；因果区外的块由 mask 打掉（贡献精确 0）。"])),
     ix.KIND_GQA_DENSE: dict(
         en="GQA Dense", cn="任务切片", low=lambda s, kw: "S2（切片）",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "跟随 epilogue mask"),
@@ -134,21 +142,37 @@ def page_text(kind, shape, mr, kw):
             read=["同一个格子在两张真实图上各出现一次（颜色不同 = batch 不同）。",
                   "一条 core 在两个 batch 间来回切 → 每核要**两个累加 buffer**（parity 0/1）。"])
     if kind == ix.KIND_LEFT_UP_CAUSAL:
+        square = m <= n          # S1 = S2（或更短）时这条规则委托给方形折叠
         return dict(
-            sub=f"输入：core 数 {k} · S1 分 {m} 块 · S2 分 {n} 块 · batch {b} · causal，S1 > S2",
-            pseudo=[f"core 数 k={k}, S1 块数 m={m}, S2 块数 n={n}, batch 数 b={b}",
-                    "如果 m <= n:  直接套用 Causal Swizzle",
-                    "否则 (S1 更长):",
-                    f"    虚拟高 = 2m-n+1 = {2 * m - n + 1}",
-                    "    列号  = (r-1)/虚拟高 * active core 数 + (j-1)",
-                    "    配对号 = 列号/n+1;  虚拟列 = 列号%n+1;  虚拟行 = (r-1)%虚拟高+1",
-                    "    奇数 batch 可用行数 = m - 虚拟列 + 1",
-                    "    如果 虚拟行 <= 可用行数: 奇数 batch, 行 = 虚拟列+虚拟行-1, 列 = 虚拟列",
-                    "    否则:                  偶数 batch, 行 = m-(虚拟行-可用行数)+1, 列 = n-虚拟列+1"],
-            key="虚拟矩形比真实 causal 区大：多出来的轮次是 idle，靠 mask 打掉。",
-            ex_sub=f"虚拟高 {2 * m - n + 1} 行里，每列只有 {m} 行有活；灰格是凑不满的部分",
-            read=["**红格 = idle**（本轮该核没任务）；**灰格 = causal 区外**、要靠 mask 的块。",
-                  "注：选择器目前只在 S1 = S2 时选 Left-Up，那时它委托给 Causal Swizzle。"])
+            sub=f"输入：core 数 {k} · S1 分 {m} 块 · S2 分 {n} 块 · batch {b} · causal，"
+                + ("S1 = S2" if square else "S1 > S2"),
+            pseudo=([f"core 数 k={k}, S1 块数 m={m}, S2 块数 n={n}, batch 数 b={b}",
+                     f"如果 m <= n:  # 本例 {m} <= {n} 成立 → 走这一支",
+                     f"    直接套用 Causal Swizzle（方形折叠，见 4 节）",
+                     f"    虚拟宽 = n+1 = {n + 1} 列,  虚拟高 = m = {m} 行",
+                     "    折回真实坐标、列内走完 S1 —— 与 4 节同一套公式",
+                     f"否则 (S1 更长, 虚拟高 = 2m-n+1):  才启用左上几何（见 5b 页）"]
+                    if square else
+                    [f"core 数 k={k}, S1 块数 m={m}, S2 块数 n={n}, batch 数 b={b}",
+                     f"如果 m <= n:  直接套用 Causal Swizzle",
+                     f"否则 (S1 更长):  # 本例 {m} > {n}",
+                     f"    虚拟高 = 2m-n+1 = {2 * m - n + 1}",
+                     "    列号  = (r-1)/虚拟高 * active core 数 + (j-1)",
+                     "    配对号 = 列号/n+1;  虚拟列 = 列号%n+1;  虚拟行 = (r-1)%虚拟高+1",
+                     "    奇数 batch 可用行数 = m - 虚拟列 + 1",
+                     "    如果 虚拟行 <= 可用行数: 奇数 batch, 行 = 虚拟列+虚拟行-1, 列 = 虚拟列",
+                     "    否则:                  偶数 batch, 行 = m-(虚拟行-可用行数)+1, 列 = n-虚拟列+1"]),
+            key=("S1 = S2 时它不做自己的几何：**直接委托给方形折叠**，结果与 4 节一致。"
+                 if square else
+                 "虚拟矩形比真实 causal 区大：多出来的轮次是 idle，靠 mask 打掉。"),
+            ex_sub=("形状与 4 节相同（S1 = S2），因为这一支就是委托方形折叠 —— 对照两页可以确认结果一致"
+                    if square else
+                    f"虚拟高 {2 * m - n + 1} 行里，每列只有 {m} 行有活；灰格是凑不满的部分"),
+            read=(["**同一个 (B, S1, S2) 集合**，与 4 节的例子逐格相同 —— 委托就是这条路。",
+                   "区别只在调度器怎么选：S1 = S2 时它可能落到这条规则上，再走进方形折叠。"]
+                  if square else
+                  ["**红格 = idle**（本轮该核没任务）；**灰格 = causal 区外**、要靠 mask 的块。",
+                   f"虚拟高 = 2m-n+1 = {2 * m - n + 1}：比真实 causal 区高，多出来的行只能空转。"]))
     if kind == ix.KIND_GQA_DENSE:
         return dict(
             sub=f"输入：core 数 {k} · S1 分 {m} 块 · S2 分 {n} 块 · batch {b} · GQA g={g}",
@@ -304,8 +328,14 @@ def grid_cells(ts, batch, head=None):
 
 
 def virtual_cells(kind, shape, mr, kw):
-    """虚拟矩形：格内写 core 与轮次，配色同样按 (batch, 虚拟列) 走。"""
+    """虚拟矩形：格内写 core 与轮次，配色同样按 (batch, 虚拟列) 走。
+
+    走哪套几何跟算法本身一致：**S1 = S2 时 Left-Up 也委托方形折叠**（虚拟宽 = n+1、
+    虚拟高 = m），只有 S1 > S2 才用左上几何（虚拟高 = 2m-n+1）。
+    """
     m, n = shape.M(), shape.N()
+    fold_style = (kind == ix.KIND_CAUSAL_SWIZZLE
+                  or (kind == ix.KIND_LEFT_UP_CAUSAL and m <= n))
     cells = {}
     for j in range(1, shape.coreNum + 1):
         for r in range(1, mr + 1):
@@ -313,7 +343,7 @@ def virtual_cells(kind, shape, mr, kw):
             if c is None:
                 continue
             label = f"C{j}\n第{r}轮"
-            if kind == ix.KIND_CAUSAL_SWIZZLE:
+            if fold_style:
                 n_new = n + 1 if m == n else (n - m + 2) + (n + 1)
                 v = ix.Raw()
                 ix.cal_dense_swizzle_index(shape.coreNum, m, n_new, shape.Bh() >> 1,
@@ -737,10 +767,11 @@ def draw_algo_page(prs, num, name, kind, shape, mr, kw, causal):
 
     # 「为什么这样分」——直接放在矩阵下面，回答"为什么这么划"
     sd.text(s, 0.73, bottom + 0.30, "为什么这样分", w=4.0, h=0.30, size=15, bold=True)
-    for i, line in enumerate(meta["why"]):
+    why_lines = meta["why"](shape, kw) if callable(meta["why"]) else meta["why"]
+    for i, line in enumerate(why_lines):
         sd.text(s, 0.73, bottom + 0.66 + i * 0.30, line, w=9.60, h=0.28, size=13.0,
                 color=sd.BODY_TEXT)
-    why_bottom = bottom + 0.66 + len(meta["why"]) * 0.30
+    why_bottom = bottom + 0.66 + len(why_lines) * 0.30
 
     # 右栏
     yy = 2.02
@@ -808,7 +839,7 @@ def draw_leftup_big_page(prs, num):
     s = sd.blank_slide(prs)
     sd.title(s, f"{num}b. Left-Up Causal —— 非方形例子（S1 {m} 块 · S2 {n} 块）", y=0.62)
     sd.text(s, 0.73, 1.22,
-            f"S2 ≠ S1：虚拟高 = 2m-n+1 = {vm}，每个核守一条虚拟列走满 {vm} 行 —— 零 idle。",
+            f"上一页 S1 = S2，走的是委托的方形折叠；这一页 S1 > S2，才是它自己的几何：虚拟高 = 2m-n+1 = {vm}。",
             w=15.2, h=0.30, size=16, color=sd.BODY_TEXT)
     # 左栏：两个 batch 的真实覆盖图（阶梯状 = causal 区）
     cell, gy = 0.62, 2.60

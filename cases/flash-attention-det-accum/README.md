@@ -53,7 +53,7 @@ given (round, core) is always the same, which is exactly where determinism comes
 | 1 | Column-private swizzle | Low digit is the KV column: one core owns a column for m rounds and walks S1 inside it | k=2, 3×3 tiles, 2 batches | 9 rounds, filled; 3 columns per core |
 | 2 | Batch-first splitting | Low digit is the batch: cores land on different batches in the same round, so core count may exceed the S1 tile count | k=4, 2×2 tiles, 2 batches | filled in 2 rounds |
 | 3 | Causal folding | Two adjacent batches are folded into one full rectangle; the two triangles fit exactly | k=2, 3×3 tiles, 2 batches | 12 tasks, zero idle slots |
-| 4 | Left-up causal folding | Its own geometry when S1 is longer than S2; virtual height = 2m-n+1 | k=2, 3×2 tiles, 2 batches | 10 tasks, 4 need masking |
+| 4 | Left-up causal folding | S1 = S2: delegates to the square fold (page 5). S1 > S2: its own geometry, virtual height = 2m-n+1 (page 5b) | S1 = S2: k=2, 3×3 tiles; S1 > S2: k=3, 4×3 tiles | 12 tasks zero idle / 18 tasks zero idle |
 | 5 | GQA slicing | One core owns R consecutive task ids; a gcd correction keeps same-round keys distinct | k=2, 2×2 tiles, group 2 | 4 rounds, 8 tasks |
 | 6 | Ragged column-private | Per-batch round prefix; column-private inside a batch; batches may need different round counts | k=2, unequal lengths | 12 tasks + 2 idle |
 | 7 | Ragged flattening | Flatten by area prefix, split into k slices, scan each in order | k=2, group 2 | 12 tasks, zero idle |
@@ -76,8 +76,9 @@ keys instead. That is a design choice, not a defect.
 ## Known pitfalls
 
 - For algorithm 4 (left-up causal folding), the `m > n` branch is **never selected by the
-  current selector** — it is only chosen when S1 and S2 are the same length, and that path
-  delegates to algorithm 3. The page says so explicitly; don't mistake it for a live code path.
+  current selector** — it is only chosen when S1 = S2, and that path delegates to algorithm 3.
+  Page 5 is that delegation case; page 5b shows the `m > n` geometry explicitly. Both are drawn
+  from real runs of the algorithm, but only the S1 = S2 path is reachable through the selector.
 - Shortcuts such as "skip the reduction when only one tile contributes" **do not exist** in the
   reference implementation (it always goes seed → reduce → single atomic add). Don't copy an
   imagined optimization into a diagram.
