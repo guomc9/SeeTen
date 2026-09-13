@@ -92,23 +92,29 @@ def _text_extents(shp):
     """逐段落估算实际文字占位 (x, y, w, h)：按字号和对齐算，不靠注册表。
 
     python-pptx 每次遍历都会重建 shape 代理，所以只能现算。
+    换行后的行数先算完，再按 anchor 定位 —— 否则自动换行的文本会被少算高度。
     """
-    out = []
     tf = shp.text_frame
     l, t, w, h = _geom(shp)
-    paras = list(tf.paragraphs)
-    # 文字竖向外框按实际行高算（不是声明框高），否则会误报相邻元素重叠
-    heights, sizes, monos, bodies = [], [], [], []
-    for p in paras:
+    wrap = tf.word_wrap is True
+    ml = Emu(tf.margin_left).inches if tf.margin_left is not None else 0.1
+    mr = Emu(tf.margin_right).inches if tf.margin_right is not None else 0.1
+    avail = max(0.3, w - ml - mr)
+    items = []
+    for p in tf.paragraphs:
         body = "".join(r.text for r in p.runs)
         size = max((r.font.size.pt for r in p.runs if r.font.size is not None),
                    default=18.0)
-        bodies.append(body)
-        sizes.append(size)
-        monos.append(any((r.font.name or "").lower() in
-                         ("consolas", "courier new", "monospace") for r in p.runs))
-        heights.append(max(size * 1.30 / 72.0, 0.16))
-    total = sum(heights)
+        mono = any((r.font.name or "").lower() in
+                   ("consolas", "courier new", "monospace") for r in p.runs)
+        line_h = max(size * 1.30 / 72.0, 0.16)
+        ew = est_text_width(body, size, mono=mono) if body.strip() else 0.0
+        if wrap and body.strip():
+            # 自动换行的文本框：宽度不可能超出可用宽度，行数按估算宽度折算
+            line_h *= max(1, int(ew / avail) + (1 if ew % avail else 0))
+            ew = min(ew, avail)
+        items.append((ew, line_h, p.alignment))
+    total = sum(it[1] for it in items)
     anchor = tf.vertical_anchor
     if anchor == MSO_ANCHOR.MIDDLE:
         y = t + (h - total) / 2.0
@@ -116,32 +122,16 @@ def _text_extents(shp):
         y = t + h - total
     else:
         y = t
-    # 自动换行的文本框：宽度不可能超出可用宽度，行数按估算宽度折算
-    wrap = tf.word_wrap is True
-    ml = Emu(tf.margin_left).inches if tf.margin_left is not None else 0.1
-    mr = Emu(tf.margin_right).inches if tf.margin_right is not None else 0.1
-    avail = max(0.3, w - ml - mr)
-    for i, body in enumerate(bodies):
-        if not body.strip():
-            y += heights[i]
-            continue
-        ew_raw = est_text_width(body, sizes[i], mono=monos[i])
-        lines = 1
-        if wrap:
-            lines = max(1, int(ew_raw / avail) + (1 if ew_raw % avail else 0))
-            heights[i] = heights[i] * lines
-            ew = min(ew_raw, avail)
-        else:
-            ew = ew_raw
-        al = paras[i].alignment
+    out = []
+    for ew, line_h, al in items:
         if al == PP_ALIGN.CENTER:
             x0 = l + (w - ew) / 2.0
         elif al == PP_ALIGN.RIGHT:
             x0 = l + w - ew
         else:
             x0 = l
-        out.append((x0, y, ew, heights[i]))
-        y += heights[i]
+        out.append((x0, y, ew, line_h))
+        y += line_h
     return out
 
 
@@ -384,13 +374,15 @@ def _write_cell(cell, body: str, size=17.5, bold=True, color=ON_BLOCK,
     cell.margin_right = Emu(0)
     cell.margin_top = Emu(MARGIN)
     cell.margin_bottom = Emu(MARGIN)
-    p = tf.paragraphs[0]
-    p.alignment = PP_ALIGN.CENTER
-    for seg, is_cjk in _split_scripts(body):
-        run = p.add_run()
-        run.text = seg
-        _style_run(run, size=size, bold=bold, color=color,
-                   font=(cjk_font if is_cjk else font), cjk_font=cjk_font)
+    lines = body.split("\n")            # 允许格内两行（"S1=2" / "S2=3"）
+    for i, ln in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = PP_ALIGN.CENTER
+        for seg, is_cjk in _split_scripts(ln):
+            run = p.add_run()
+            run.text = seg
+            _style_run(run, size=size, bold=bold, color=color,
+                       font=(cjk_font if is_cjk else font), cjk_font=cjk_font)
 
 
 # ---------------------------------------------------------------- 六种表式
@@ -702,6 +694,52 @@ def task_matrix(slide, x, y, core_labels, rows, col_w=4.2, row_h=0.52,
     return fit_table(tbl)
 
 
+def trace_table(slide, x, y, col_labels, rows, total_w=6.90, first_col_w=1.20,
+                row_h=0.40, size=11.0, head=None, empty="空闲"):
+    """轮次轨迹表：**行 = 核，列 = 轮次**，格内写这条核这一轮拿到的列（或批）。
+
+    它是任务矩阵的转置视角 —— 任务矩阵回答"这一轮各核在做什么"，
+    这张表回答"一条核连着几轮守着同一列"。cells 里 None 表示这一轮空闲。
+    返回底边 y。
+    """
+    n = len(col_labels)
+    cw = max(0.30, (total_w - first_col_w) / max(1, n))
+    tbl = _plain_table(slide, x, y, len(rows) + 1, n + 1,
+                       cell_w=int(cw * 914400), cell_h=int(row_h * 914400))
+    tbl.columns[0].width = Inches(first_col_w)
+    for i in range(1, n + 1):
+        tbl.columns[i].width = Inches(cw)
+    for i in range(len(rows) + 1):
+        tbl.rows[i].height = Inches(row_h)
+    head = head or []
+    for c in range(n + 1):
+        cell = tbl.cell(0, c)
+        _cell_border(cell)
+        _fill_cell(cell, ON_BLOCK)
+        body = head[c] if c < len(head) else col_labels[c - 1]
+        _write_cell_lines(cell, [str(body)], size=size, colors=[TITLE_TEXT])
+    hole = hole_color()
+    for r, (rlabel, cells) in enumerate(rows, start=1):
+        cell = tbl.cell(r, 0)
+        _cell_border(cell)
+        _write_cell_lines(cell, [str(rlabel)], size=size, colors=[TITLE_TEXT])
+        for c in range(n):
+            cell = tbl.cell(r, c + 1)
+            _cell_border(cell)
+            val = cells[c] if c < len(cells) else None
+            if isinstance(val, dict):                  # 自带底色的格子
+                _fill_cell(cell, val.get("fill"))
+                _write_cell_lines(cell, [str(val["text"])], size=size,
+                                  colors=[val.get("color", ON_BLOCK)])
+            elif val is None:
+                _fill_cell(cell, hole["fill"])
+                _write_cell_lines(cell, [empty], size=size * 0.85,
+                                  colors=[hole["text"]])
+            else:
+                _write_cell_lines(cell, [str(val)], size=size, colors=[TITLE_TEXT])
+    return fit_table(tbl), y + (len(rows) + 1) * row_h
+
+
 def pseudocode_block(slide, x, y, w, lines, size=12.5, pad=0.18, line_h=0.235,
                      title=None):
     """伪代码块：浅灰底 + 等宽字 + 注释灰 + 关键字蓝（配色见 assets/color-sets.json）。
@@ -818,11 +856,20 @@ def check_layout(prs: Presentation, slide_index=None):
 
 # ---------------------------------------------------------------- 通用小构件
 
+def panel_height(n_rows, row_h=0.42, gap=0.44):
+    """panel() 画完会占多高（含表外标题那一行）。
+
+    排版前先算高度、再决定这块放哪一栏 —— 否则只能"画完发现放不下"。
+    """
+    return gap + (n_rows + 1) * row_h
+
+
 def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None,
           gap=0.44):
     """带表外标题的小表（标题不占表格空间）。返回底边 y。
 
     gap：标题与表格之间的间距 —— 表块和文字不要贴太近，留够呼吸。
+    格内文本用 `\\n` 分行（较长的一句拆两行，比把表拉宽更省地方）。
     """
     text(slide, x, y, head, w=(w or sum(col_w) + 0.4), h=0.30, size=15.0, bold=True)
     tbl = _plain_table(slide, x, y + gap, len(rows) + 1, len(header),
@@ -840,7 +887,9 @@ def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None,
         for c, val in enumerate(row):
             cell = tbl.cell(r, c)
             _cell_border(cell)
-            _write_cell_lines(cell, [str(val)], size=size, colors=[TITLE_TEXT])
+            lines = str(val).split("\n")
+            _write_cell_lines(cell, lines, size=size,
+                              colors=[TITLE_TEXT] * len(lines))
     return y + gap + (len(rows) + 1) * row_h
 
 

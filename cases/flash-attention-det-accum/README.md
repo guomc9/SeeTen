@@ -20,11 +20,12 @@ construction.
 |---|---|
 | Table as a tensor canvas | Tile grid: cells are tiles, color is ownership, cell text is the tile id |
 | Task matrix (rounds × cores) | Rows are rounds, columns are C1..Ck, cells read `S1=2  S2=3` |
-| Coverage grid on the (S1, S2) plane | Position is the coordinate, cell text is the round, color is the core; axes marked with arrows |
+| Coverage grid on the (S1, S2) plane | Position is the coordinate, cell text is the round, color is the core; a `plain` column-private grid shows traversal order when nothing is being encoded |
 | Pseudocode first | Every page leads with pseudocode written with concrete names, then the example |
-| Fill whitespace with real tables | Comparison table (which rule applies to this shape), cost numbers, per-core column list |
+| Two-level color | Hue = which batch, shade of the same hue = which KV column (S2); S1 does not drive color |
+| Transposed trace table | Rows are cores, columns are rounds, cell = the column that core holds that round — reads "why the same S2 shows up on several cores" straight off the page |
+| Fill whitespace with real tables | Comparison table (which rule applies to this shape), cost numbers, per-core column list; placed by priority into whichever column has room |
 | Ownership labels hug their table | `B=1`, `N2=1`, `G=1` span only their own grid and sit right on top of it |
-| Color presets | Lane color set distinguishes cores; `hole` gray marks an idle (round, core) slot |
 
 ## Files
 
@@ -32,7 +33,7 @@ construction.
 |---|---|
 | `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
 | `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
-| `out/v4-index-schedules.pptx` | The generated pages (15: overview + 7 methods x 2) |
+| `out/v4-index-schedules.pptx` | The generated pages (16: overview + axis/causal walkthrough + 7 methods x 2) |
 
 ```bash
 python index_schedules.py          # check the seven algorithms first (expect zero conflicts)

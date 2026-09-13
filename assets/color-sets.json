@@ -44,6 +44,15 @@
         { "fill": "#A5B4CB", "text": "#1F2329" },
         { "fill": "#868E96", "text": "#FFFFFF" }
       ]
+    },
+    "plain": {
+      "_note": "没有语义要编码时用：0 号是浅底（放序号/文号），1 号是强调色（圈出某一行/列）",
+      "colors": [
+        { "fill": "#EDF0F5", "text": "#1F2329" },
+        { "fill": "#4E7CF0", "text": "#FFFFFF" },
+        { "fill": "#DCE3EF", "text": "#1F2329" },
+        { "fill": "#C3CDDE", "text": "#1F2329" }
+      ]
     }
   },
   "hole": {
