@@ -226,12 +226,47 @@ def _split_scripts(text: str):
     return out
 
 
+EMPH_COLOR = "D83931"      # 行内强调（`==…==`）默认用的颜色
+
+
+def _rich_segments(body: str, bold, color):
+    """把 `**粗**` / `==强调==` 解析成 (文本, 是否粗, 颜色) 片段，其余原样。
+
+    页面上不会出现星号或等号 —— 它们是**输入**的标记，不是要渲染的内容。
+    """
+    out, buf, i = [], "", 0
+    while i < len(body):
+        if body.startswith("**", i):
+            j = body.find("**", i + 2)
+            if j > 0:
+                if buf:
+                    out.append((buf, bold, color)); buf = ""
+                out.append((body[i + 2:j], True, color))
+                i = j + 2
+                continue
+        if body.startswith("==", i):
+            j = body.find("==", i + 2)
+            if j > 0:
+                if buf:
+                    out.append((buf, bold, color)); buf = ""
+                out.append((body[i + 2:j], True, EMPH_COLOR))
+                i = j + 2
+                continue
+        buf += body[i]
+        i += 1
+    if buf:
+        out.append((buf, bold, color))
+    return out
+
+
 def text(slide, x, y, body: str, w=4.0, h=0.42, size=20.0, bold=False,
          color=TITLE_TEXT, font=LATIN, cjk_font=CJK, align=PP_ALIGN.LEFT,
          anchor=MSO_ANCHOR.MIDDLE, mixed_scripts=True, wrap=False, mono=False):
     """通用标签文本框（无填充、无边框），坐标单位英寸。
 
     建好后把估算外框记在 shape 上，check_layout() 用它判断有没有越界。
+    body 里可以写 `**重点**`（加粗）和 `==要点==`（换成强调色）做行内强调 ——
+    字面上的星号/等号不会渲染出来。
     """
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
     tf = box.text_frame
@@ -240,14 +275,16 @@ def text(slide, x, y, body: str, w=4.0, h=0.42, size=20.0, bold=False,
     tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
     p = tf.paragraphs[0]
     p.alignment = align
-    segs = _split_scripts(body) if (mixed_scripts and font == LATIN and cjk_font) else [(body, False)]
-    for seg, is_cjk in segs:
-        run = p.add_run()
-        run.text = seg
-        _style_run(run, size=size, bold=bold, color=color,
-                   font=(cjk_font if (is_cjk and cjk_font) else font),
-                   cjk_font=cjk_font)
-    lines = body.split("\n")
+    plain = body.replace("**", "").replace("==", "")       # 估宽按去掉标记的文本算
+    for seg, seg_bold, seg_color in _rich_segments(body, bold, color):
+        for piece, is_cjk in (_split_scripts(seg) if (mixed_scripts and font == LATIN
+                                                       and cjk_font) else [(seg, False)]):
+            run = p.add_run()
+            run.text = piece
+            _style_run(run, size=size, bold=seg_bold, color=seg_color,
+                       font=(cjk_font if (is_cjk and cjk_font) else font),
+                       cjk_font=cjk_font)
+    lines = plain.split("\n")
     est_w = max(est_text_width(ln, size, mono=mono) for ln in lines)
     if wrap:
         est_w = min(est_w, w)
@@ -625,7 +662,10 @@ def tag_row(slide, x, y, tags, size=13.0, pad=0.16, gap=0.14, h=0.34,
 
 def _write_cell_lines(cell, lines, size=11.0, colors=None, font=LATIN,
                       cjk_font=CJK, line_gap=0.9):
-    """单元格多行文本：每行一个段落，可逐行指定颜色。"""
+    """单元格多行文本：每行一个段落，可逐行指定颜色。
+
+    行内也能用 `**粗**` / `==强调==`（见 `_rich_segments`），字面标记不会画出来。
+    """
     tf = cell.text_frame
     tf.word_wrap = False
     cell.vertical_anchor = MSO_ANCHOR.MIDDLE
@@ -638,11 +678,12 @@ def _write_cell_lines(cell, lines, size=11.0, colors=None, font=LATIN,
         p.alignment = PP_ALIGN.CENTER
         p.line_spacing = line_gap
         col = (colors[i] if colors else None) or ON_BLOCK
-        for seg, is_cjk in _split_scripts(body):
-            run = p.add_run()
-            run.text = seg
-            _style_run(run, size=size, bold=False, color=col,
-                       font=(cjk_font if is_cjk else font), cjk_font=cjk_font)
+        for seg, seg_bold, seg_color in _rich_segments(body, False, col):
+            for piece, is_cjk in _split_scripts(seg):
+                run = p.add_run()
+                run.text = piece
+                _style_run(run, size=size, bold=seg_bold, color=seg_color,
+                           font=(cjk_font if is_cjk else font), cjk_font=cjk_font)
 
 
 def task_matrix(slide, x, y, core_labels, rows, col_w=4.2, row_h=0.52,
@@ -802,6 +843,42 @@ def axis_arrow(slide, x, y, length, direction, label, label_off=0.16,
         arrow(slide, x, y, x2, y)
         text(slide, min(x, x2), y - label_off - 0.18, label, w=1.6, h=0.30,
              size=size, bold=label_bold, color=TITLE_TEXT, align=PP_ALIGN.LEFT)
+
+
+def check_cells(prs: Presentation, pad=0.06):
+    """逐格检查：**格内文字会不会顶出格子**（表格的格不换行，超了会横穿到隔壁列）。
+
+    返回 [(页, 表, 行, 列, 文字宽, 格宽), ...]。收尾除了 check_layout 还要跑这个 ——
+    版心检查看不出来"文字压过格线"，而它恰恰是最常见的观感问题。
+    """
+    out = []
+    for i, slide in enumerate(prs.slides, 1):
+        for ti, shp in enumerate(slide.shapes):
+            if not (getattr(shp, "has_table", False) and shp.has_table):
+                continue
+            tbl = shp.table
+            widths = [Emu(c.width).inches for c in tbl.columns]
+            heights = [Emu(r.height).inches for r in tbl.rows]
+            for r, row in enumerate(tbl.rows):
+                for c, cell in enumerate(row.cells):
+                    lines = ["".join(run.text for run in p.runs)
+                             for p in cell.text_frame.paragraphs]
+                    sizes = [max((run.font.size.pt for run in p.runs
+                                  if run.font.size is not None), default=12.0)
+                             for p in cell.text_frame.paragraphs]
+                    ml = Emu(cell.margin_left).inches
+                    mr = Emu(cell.margin_right).inches
+                    avail_w = max(0.05, widths[c] - ml - mr)
+                    avail_h = max(0.05, heights[r] - 0.09)
+                    wide = [est_text_width(ln, sz) for ln, sz in zip(lines, sizes)]
+                    tall = sum(max(sz * 1.30 / 72.0, 0.12) for sz in sizes)
+                    if wide and max(wide) > avail_w + pad:
+                        out.append((i, shp.name, r, c, round(max(wide), 2),
+                                    round(avail_w, 2), max(lines, key=len)[:22]))
+                    elif tall > avail_h + pad:
+                        out.append((i, shp.name, r, c, round(tall, 2),
+                                    round(avail_h, 2), f"[竖排] {lines[0][:18]}"))
+    return out
 
 
 def check_layout(prs: Presentation, slide_index=None):

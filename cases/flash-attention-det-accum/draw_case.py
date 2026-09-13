@@ -37,48 +37,47 @@ META = {
         tags=lambda s, kw: [("layout", "TND" if "cu_q" in kw else "BSND"),
                             ("causal", "否"), ("头型", "MHA (g=1)"),
                             ("dk/dV", "列私有")],
-        why=["task id 的低位是 S2 列，所以同一轮里相邻两条核落到相邻的两列上；",
-             "一条核在 m 轮内 task id 不变 → 它一直守着同一列，只在列内把 S1 从第一行走到最后一行。",
-             "同一个 S2 出现在多条核上时，那是不同 batch、不同轮。"]),
+        why=["低位是 S2 列 → 同一轮里相邻的核落在**相邻两列**上；",
+             "task id 在 m 轮内不变 → 一条核**守死一条列**，列内把 S1 走一遍。",
+             "同一个 S2 出现在多条核上，是 **不同 batch / 不同轮**。"]),
     ix.KIND_DENSE_INDEX: dict(
         en="Dense Index", cn="先分批再分列", low=lambda s, kw: "B 批次",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "否"),
                             ("头型", "MHA (g=1)"), ("dk/dV", "列私有"),
                             ("核数", "> S1 块数")],
-        why=["低位换成了 batch：同一轮各核落在不同 batch、同一列上，S1 不会撞；",
-             "所以核数可以超过 S1 块数 —— 代价是核不再独占整条列，改由切片保证有序。"]),
+        why=["低位换成 batch → 同一轮各核**分属不同 batch**，S1 撞不到一起；",
+             "所以**核数可以超过 S1 块数**，代价是列私有要靠切片保证。"]),
     ix.KIND_CAUSAL_SWIZZLE: dict(
         en="Causal Swizzle", cn="因果折叠", low=lambda s, kw: "S2（fold 后）",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "是，方形"),
                             ("头型", "MHA (g=1)"), ("buffer", "2 个 (parity)")],
-        why=["fold 把两个相邻 batch 的三角拼成一个 m x (n+1) 的满矩形，task id 在矩形里按同样的低位规则排；",
-             "奇数列用 parity-0 buffer、偶数列用 parity-1，所以一条核在两个 batch 之间交替。",
-             "矩形是满的 → 没有 idle 槽位，也不需要在 epilogue 打 mask。"]),
+        why=["fold 把两个相邻 batch 的三角拼成一个 **m x (n+1) 的满矩形**，task id 在矩形里照排；",
+             "奇数列用 parity-0、偶数列用 parity-1 buffer → 一条核在两个 batch 间来回切。",
+             "矩形是满的 → **没有 idle、也不用打 mask**。"]),
     ix.KIND_LEFT_UP_CAUSAL: dict(
         en="Left-Up Causal", cn="左上对齐", low=lambda s, kw: "S2（虚拟）",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "是，S1 > S2"),
                             ("头型", "MHA (g=1)"), ("buffer", "2 个 (parity)")],
-        why=["S1 比 S2 长时换一套几何：虚拟高 = 2m-n+1，每列只有 m 行有活；",
-             "多出来的行是 idle，落在因果区外的块由 epilogue 的 mask 打掉（贡献精确 0）。"]),
+        why=["S1 比 S2 长时换一套几何：**虚拟高 = 2m-n+1**，每列只有 m 行有活；",
+             "多出来的行是 idle；因果区外的块由 mask 打掉（贡献精确 0）。"]),
     ix.KIND_GQA_DENSE: dict(
         en="GQA Dense", cn="任务切片", low=lambda s, kw: "S2（切片）",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "跟随 epilogue mask"),
                             ("头型", "GQA (g>1)"), ("dk/dV", "共享 workspace")],
-        why=["GQA 里一个 KV head 对应 g 个 Q head，一条 KV 列会横跨多条核 → 没法列私有；",
-             "改用连续 task id 切片分给各核，靠 gcd 修正让同一轮各核的 (B,N2,G,S1) 互不相同，",
-             "跨核的 atomic add 因此有确定的先后。"]),
+        why=["一个 KV head 对应 g 个 Q head → 一条 KV 列横跨多条核，**没法列私有**；",
+             "改按**连续 task id 切片**分核，靠 gcd 修正让同轮各核的 (B,N2,G,S1) 互不相同。"]),
     ix.KIND_TND_DENSE: dict(
         en="TND Dense Swizzle", cn="逐批列私有", low=lambda s, kw: "本批 S2 列",
         tags=lambda s, kw: [("layout", "TND (变长)"), ("causal", "否"),
                             ("头型", "MHA (g=1)"), ("dk/dV", "列私有")],
-        why=["每个 batch 有自己的 round 前缀（长度可以不同），批内仍然按列私有排；",
-             "核数超过本批的列数时，该轮这条核空转 —— 这是变长 batch 的代价。"]),
+        why=["每个 batch 有自己的 round 前缀，**批内仍按列私有**排；",
+             "核数超过本批列数时那一条核空转 —— 变长 batch 的代价。"]),
     ix.KIND_TND_GQA_DENSE: dict(
         en="TND GQA Dense", cn="按面积展平", low=lambda s, kw: "展平索引",
         tags=lambda s, kw: [("layout", "TND (变长)"), ("causal", "跟随 epilogue mask"),
                             ("头型", "GQA (g>1)"), ("dk/dV", "共享 workspace")],
-        why=["按面积前缀把整个任务空间展平，再等分成 k 段，每条核顺序扫自己那段；",
-             "不追求列私有，只保证同一轮各核的 (B,N2,G,S1) 互不相同。"]),
+        why=["按面积前缀把任务空间**展平后等分成 k 段**，每条核顺序扫自己那段；",
+             "不追求列私有，只保证**同轮各核的 (B,N2,G,S1) 互不相同**。"]),
 }
 
 
@@ -103,8 +102,8 @@ def page_text(kind, shape, mr, kw):
                     "    输出: B, N2, G, S1=第几行, S2=第几列"],
             key="低位走列：同一轮里各核是同一个 batch 的不同列；一条核守死一条列，列内把 S1 走完。",
             ex_sub="把任务矩阵摊到 S1×S2 平面上：纵轴 S1、横轴 S2；颜色 = batch，同一个颜色的深浅 = 第几条 KV 列，格内是 core 与轮次",
-            read=["一行里三格深浅不同 = 同 batch 的三条 KV 列；S1 不参与配色，所以行内颜色一致。",
-                  "低位走列：2 条 core 各包 3 条列，9 轮正好把 18 个块铺满。"])
+            read=["一行三格深浅不同 = 同 batch 的三条 KV 列；**S1 不配色**，所以行内颜色一致。",
+                  "2 条 core 各包 3 条列，9 轮把 18 个块铺满。"])
     if kind == ix.KIND_DENSE_INDEX:
         return dict(
             sub=f"输入：core 数 {k} · S1 分 {m} 块 · S2 分 {n} 块 · batch {b}（core 数 > S1 块数）",
@@ -117,8 +116,8 @@ def page_text(kind, shape, mr, kw):
                     "    输出: B, N2, G, S1=第几行, S2=第几列"],
             key="低位走批：同一轮里各核分属不同 batch，多出来的核用 batch 维度消化 —— 所以核数可以超过 S1 块数。",
             ex_sub="同一个块集（2 batch x 2x2 块）换成本页规则，只用 2 轮就铺满",
-            read=["4 条核各守一条 (B, S2) 列，每个块只落在一条核上。",
-                  "对比上一页：那里同轮各核是同一个 batch 的不同列；这里同轮各核是同一条列的不同 batch。"])
+            read=["4 条核各守一条 (B, S2) 列，每块只落在一条核上。",
+                  "对比上一页：同轮各核从**同一个 batch 的不同列**变成**同一条列的不同 batch**。"])
     if kind == ix.KIND_CAUSAL_SWIZZLE:
         return dict(
             sub=f"输入：core 数 {k} · S1 分 {m} 块 · S2 分 {n} 块 · batch {b} · causal，S1 = S2",
@@ -133,7 +132,7 @@ def page_text(kind, shape, mr, kw):
             key="两个三角正好拼成一个 m 行 n+1 列的满矩形：没有 idle 槽位、也不用打 mask。",
             ex_sub="先看下面的虚拟矩形（两个三角拼成的满矩形），再对照上面两张真实的块图",
             read=["同一个格子在两张真实图上各出现一次（颜色不同 = batch 不同）。",
-                  "一条 core 在两个 batch 之间来回切，所以每核要两个累加 buffer（parity 0/1）。"])
+                  "一条 core 在两个 batch 间来回切 → 每核要**两个累加 buffer**（parity 0/1）。"])
     if kind == ix.KIND_LEFT_UP_CAUSAL:
         return dict(
             sub=f"输入：core 数 {k} · S1 分 {m} 块 · S2 分 {n} 块 · batch {b} · causal，S1 > S2",
@@ -148,8 +147,8 @@ def page_text(kind, shape, mr, kw):
                     "    否则:                  偶数 batch, 行 = m-(虚拟行-可用行数)+1, 列 = n-虚拟列+1"],
             key="虚拟矩形比真实 causal 区大：多出来的轮次是 idle，靠 mask 打掉。",
             ex_sub=f"虚拟高 {2 * m - n + 1} 行里，每列只有 {m} 行有活；灰格是凑不满的部分",
-            read=["红色格 = 本轮该核没任务（idle）；灰格 = 落在 causal 区外、要靠 mask 的块。",
-                  "注：选择器目前只在 S1 与 S2 等长时选 Left-Up，那时它会委托给 Causal Swizzle。"])
+            read=["**红格 = idle**（本轮该核没任务）；**灰格 = causal 区外**、要靠 mask 的块。",
+                  "注：选择器目前只在 S1 = S2 时选 Left-Up，那时它委托给 Causal Swizzle。"])
     if kind == ix.KIND_GQA_DENSE:
         return dict(
             sub=f"输入：core 数 {k} · S1 分 {m} 块 · S2 分 {n} 块 · batch {b} · GQA g={g}",
@@ -165,8 +164,8 @@ def page_text(kind, shape, mr, kw):
             key="一条 KV 列横跨多条核，没法列私有 —— 改用共享 workspace 的轮序 atomic add，"
                 "确定性靠“同轮各核的 (B,N2,G,S1) 互不相同”。",
             ex_sub="同一个 (S1,S2) 格上叠着两个 G 的任务，所以按 G 拆成两张图",
-            read=["同一格上两个 G 的任务用两行文字分开；颜色仍是 batch、深浅仍是 KV 列。",
-                  "G1 和 G2 交替落位，避免同轮抢同一个 S1。"])
+            read=["同一格上两个 G 的任务分两行写；颜色仍是 batch、深浅仍是 KV 列。",
+                  "G1 / G2 **交替落位**，避免同轮抢同一个 S1。"])
     if kind == ix.KIND_TND_DENSE:
         q, kk = rag()
         return dict(
@@ -186,7 +185,7 @@ def page_text(kind, shape, mr, kw):
                     "    task id 超出该 batch 列数 → 本核本轮 idle"],
             key="每个 batch 按自己的长度排轮次，短 batch 不拖累长 batch；核数超过本 batch 列数时会有 idle。",
             ex_sub="两个 batch 的网格大小不同：batch1 是 3x2 块，batch2 是 2x3 块",
-            read=["灰格 = 本轮该核没有可派的列（batch1 只有 2 列，第 4 轮只剩一条核有活）。",
+            read=["**灰格 = 本轮无列可派**（batch1 只有 2 列，第 4 轮只剩一条核有活）。",
                   "对比算法页的对照表：按最长 batch 对齐要多花好几轮。"])
     if kind == ix.KIND_TND_GQA_DENSE:
         q, kk = rag()
@@ -205,7 +204,7 @@ def page_text(kind, shape, mr, kw):
                     "    第几组 = 批内号 换算;  第几行 = 批内号 % m;  第几列 = ceil(批内号 / (m*g))"],
             key="变长 GQA 无法逐 batch 对齐，直接把整个任务空间展平等分给各核，顺序扫过。",
             ex_sub="面积大的 batch 分到的格子多；每个 (S1,S2) 格上有两个 G 的任务，按 G 拆图",
-            read=["四个小块合起来 = 12 个任务，正好被 2 条核 x 6 轮扫完，零 idle。",
+            read=["四个小块合起来 = 12 个任务，2 条核 x 6 轮扫完，**零 idle**。",
                   "batch2 只有 1x2 块，所以它那两张图更矮。"])
     raise KeyError(kind)
 
@@ -244,7 +243,7 @@ def dense_choose_rows(kind, shape, mr):
         ("低位先走", "Swizzle：S2 列   ·   Index：B 批次"),
         ("同一轮各核落在", "Swizzle：同一个 batch 的不同列\nIndex：同一条列的不同 batch"),
         ("什么时候选它", "Swizzle：核数不多，一条核守死一条列\n"
-                         "Index：核数 > S1 块数，多出的核铺到别的 batch"),
+                         "Index：核数超 S1 块数时用"),
         ("本页用", mine),
     ]
     return ("判据", "两条规则的区别"), rows
@@ -360,7 +359,7 @@ def virtual_column_rows(shape, mr):
     # 对照组：真实的一列（S2=1），只属于一个 batch
     real = sorted({(bb, s2) for (bb, s1, s2, j, r) in vmap.values()
                    if bb == 0 and s2 == 0})
-    rows.append(("普通列（对照）\nB=1 S2=1", f"{m} 格全是 (B=1 S2=1)", "1", "1"))
+    rows.append(("普通列（对照）", f"{m} 格全是 (B=1 S2=1)", "1", "1"))
     for vc in range(n_new):
         got = {}
         for (vs2, vs1), (bb, s1, s2, j, r) in vmap.items():
@@ -419,7 +418,7 @@ def draw_virtual_page(prs, num):
               ("一条上面有几个 batch", "只有 1 个", "可能跨 2 个"),
               ("一条 core 守它时", "只往一个输出块累加", "可能同时往两个\nbatch 的输出块累加"),
               ("长度", "一个 batch 的\nS1 或 S2 块数", "矩形的高 / 宽")],
-             col_w=(1.55, 1.75, 1.95), row_h=0.52, size=11.5)
+             col_w=(1.80, 1.70, 1.75), row_h=0.52, size=11.5)
     sd.panel(s, 10.60, 5.90, "虚拟行又是什么", ("虚拟行", "说明"),
              [("折叠矩形里的行", "不是某个 batch 的 S1 行"),
               ("左上对齐（S1 > S2）", "虚拟高 = 2m-n+1，每列\n只有 m 行有活"),
@@ -433,9 +432,9 @@ def draw_virtual_page(prs, num):
     sd.note(s, 0.73, 10.32,
             "虚拟列是折叠的产物：核按虚拟列分派，同一列的格子可能落在两个 batch 上。",
             w=9.70, h=0.36)
-    sd.text(s, 0.73, 11.08, "· 普通列只属于一个 batch；虚拟列可以横跨两个 batch —— 所以守它的 core 要两个累加 buffer。",
+    sd.text(s, 0.73, 11.08, "· 普通列只属于一个 batch；虚拟列可以**横跨两个 batch** —— 守它的 core 要两个累加 buffer。",
             w=9.70, h=0.32, size=15, color=sd.BODY_TEXT)
-    sd.text(s, 0.73, 11.44, "· 折回真实坐标时行列会翻转（右上那片三角），所以格内写的是它最终落到哪一块。",
+    sd.text(s, 0.73, 11.44, "· 折回真实坐标时**行列会翻转**（右上那片三角），所以格内写它最终落到哪一块。",
             w=9.70, h=0.32, size=15, color=sd.BODY_TEXT)
     return s
 
@@ -454,14 +453,14 @@ def repeat_rows(shape):
     每行都压到一行说得完 —— 表宽在一栏里放得下，才谈得上"补空白"。
     """
     gqa = shape.groupNum > 1
-    rows = [("同一个 S2 在多条 core", "低位先走 S2 列：跨轮、跨 batch 就会重复"),
-            ("同一个 S1 在多条 core", "列内逐行走 S1：每条列都要走一遍所有 S1")]
+    rows = [("同一个 S2 在多条 core", "低位走 S2 列 → **跨轮、跨 batch** 会重复"),
+            ("同一个 S1 在多条 core", "列内逐行走 S1 → 每条列都要走一遍 S1")]
     if gqa:
-        rows += [("一条 KV 列横跨多条 core", "一条列要服务 g 个 Q head，只能切片分派"),
+        rows += [("一条 KV 列横跨多条 core", "一条列要服务 g 个 Q head，**只能切片**"),
                  ("同一个 (S2,S1) 只出现一次", "双射：每个块只被派一次")]
     else:
-        rows += [("同一个 (S2,S1) 只出现一次", "双射：每个块只被派一次"),
-                 ("空泡不是 mask", "空泡是没派活，mask 是派了不累加")]
+        rows += [("同一个 (S2,S1) 只派一次", "**双射**：每个块只被派一次"),
+                 ("空泡不是 mask", "空泡 = 没派活；mask = 派了不累加")]
     return rows
 
 
@@ -610,7 +609,7 @@ def draw_axis_page(prs):
     s = sd.blank_slide(prs)
     sd.title(s, "1. 轴遍历顺序与 dS 分块", y=0.62)
     sd.text(s, 0.73, 1.22,
-            "七种规则共用同一个铺 task id 的顺序：外层慢、内层快。先认这个顺序，后面的分派才看得懂。",
+            "七种规则共用同一个铺 task id 的顺序：**外层慢、内层快**。先认这个顺序，后面的分派才看得懂。",
             w=15.2, h=0.30, size=16, color=sd.BODY_TEXT)
 
     # 轴链 b -> n2 -> s2 -> s1 -> d
@@ -669,11 +668,11 @@ def draw_axis_page(prs):
     sd.text(s, 10.60, 1.60, "为什么这样排", w=4.7, h=0.30, size=15, bold=True)
     for i, line in enumerate([
             "· 低位走内层轴 → 同一轮各 core 拿到连续的 task id，",
-            "  落在相邻的 S2 列（或相邻 batch）上。",
-            "· 一条 core 在 m 轮内 task id 不变 → 它守着同一条列，",
-            "  只在列内把 S1 从第一行走到最后一行，这才是“单核顺序累加”。",
-            "· 所以同一个 S2 会出现在多条 core 的任务里：那是不同轮、",
-            "  不同 batch；同一条 core 内部它始终是同一列连续多轮。"]):
+            "  落在**相邻的 S2 列**（或相邻 batch）上。",
+            "· 一条 core 在 m 轮内 task id 不变 → 它**守着同一条列**，",
+            "  列内把 S1 走一遍，这才是“单核顺序累加”。",
+            "· 同一个 S2 出现在多条 core 里，是**不同轮、不同 batch**；",
+            "  同一条 core 内部它始终是同一列连续多轮。"]):
         sd.text(s, 10.60, 1.98 + i * 0.32, line, w=5.35, h=0.28, size=13.0,
                 color=sd.BODY_TEXT)
     ry = repeat_panel(s, 10.60, 4.28, ix.Shape(batch=2, qSeqLen=384, kvSeqLen=384,
@@ -688,9 +687,9 @@ def draw_axis_page(prs):
     sd.note(s, 0.73, 10.32,
             "后面每种规则，只是把“低位先走哪个轴”换一下；换法不同，就得到不同的分派与不同的 idle 分布。",
             w=9.70, h=0.66)
-    sd.text(s, 0.73, 11.08, "· ① 里的数字 = task id 顺序；② 里颜色 = core，格内写第几轮算它。",
+    sd.text(s, 0.73, 11.08, "· ① 里的数字 = task id 顺序；② 颜色 = core，格内写第几轮算它。",
             w=9.70, h=0.32, size=16, color=sd.BODY_TEXT)
-    sd.text(s, 0.73, 11.44, "· ③ 说明为什么要“列私有”：一个 KV 块的 dK/dV 由 dS 的一整列累加而来。",
+    sd.text(s, 0.73, 11.44, "· ③ 是“列私有”的理由：一个 KV 块的 dK/dV 由 **dS 的一整列**累加而来。",
             w=9.70, h=0.32, size=16, color=sd.BODY_TEXT)
     return s
 
@@ -765,7 +764,7 @@ def draw_algo_page(prs, num, name, kind, shape, mr, kw, causal):
     def spec_other(w):
         if kind in (ix.KIND_DENSE_SWIZZLE, ix.KIND_DENSE_INDEX):
             head, rws = dense_choose_rows(kind, shape, mr)
-            title, col_w = "Dense Swizzle 还是 Dense Index？", (1.15, w - 1.15)
+            title, col_w = "Dense Swizzle 还是 Dense Index？", (1.32, w - 1.32)
         elif "cu_q" in kw and shape.groupNum > 1:
             head, rws = tnd_compare_rows(shape, mr, kw)
             title, col_w = "换成按最长 batch 对齐（示意）", (1.55, 0.85, w - 2.40)
@@ -783,6 +782,82 @@ def draw_algo_page(prs, num, name, kind, shape, mr, kw, causal):
           ("每条 core 负责哪些列", ["L", "R"], spec_percore),
           ("同一个值为什么会重复", ["L", "R"], spec_repeat)], gap=0.22)
     sd.note(s, 0.73, 11.15, txt["key"], w=15.2, h=0.52)
+    return s
+
+
+def draw_leftup_big_page(prs, num):
+    """更难的例子：非方形 causal（S1 4 块 · S2 3 块 · 3 条 core）。
+
+    同一个 Left-Up 规则，换成 S2 ≠ S1 的形状：虚拟高 = 2m-n+1 = 6，
+    每个核守一条虚拟列走满 6 行，零 idle。
+    """
+    m, n, k, b, mr = 4, 3, 3, 2, 6
+    shape = ix.Shape(batch=b, qSeqLen=m * 128, kvSeqLen=n * 128, qHeadNum=1,
+                     kvHeadNum=1, coreNum=k)
+    ts = ix.tasks_of(ix.KIND_LEFT_UP_CAUSAL, shape, mr)
+    r = ix.check(ix.KIND_LEFT_UP_CAUSAL, shape, mr)
+    vm = 2 * m - n + 1
+    n_max = n
+
+    s = sd.blank_slide(prs)
+    sd.title(s, f"{num}b. Left-Up Causal —— 非方形例子（S1 {m} 块 · S2 {n} 块）", y=0.62)
+    sd.text(s, 0.73, 1.22,
+            f"S2 ≠ S1：虚拟高 = 2m-n+1 = {vm}，每个核守一条虚拟列走满 {vm} 行 —— 零 idle。",
+            w=15.2, h=0.30, size=16, color=sd.BODY_TEXT)
+    # 左栏：两个 batch 的真实覆盖图（阶梯状 = causal 区）
+    cell, gy = 0.62, 2.60
+    for bb in range(b):
+        sd.axis_grid(s, LEFTX + bb * ((n + 2) * cell + 1.35), gy, m, n,
+                     grid_cells(ts, bb), f"B={bb + 1}",
+                     lane_set=LANE_SET, cell_in=cell, shade_count=n_max,
+                     empty_text="mask")
+    sd.axis_arrow(s, LEFTX - 0.68, gy, (m + 1) * cell - cell * 0.6, "down", "S1")
+    sd.axis_arrow(s, LEFTX, gy - 0.72, (n + 1) * cell - cell * 0.6, "right", "S2")
+    # 左栏下方：折叠出来的虚拟矩形（行 = 虚拟 S1，列 = 虚拟 S2）
+    left_bottom = _virtual_grid(s, LEFTX, 6.30, n, vm, virtual_cells(
+        ix.KIND_LEFT_UP_CAUSAL, shape, mr, {}), lane_set=LANE_SET,
+        cell_w=0.62, cell_h=0.46, shade_count=n_max)
+
+    def spec_percore(w):
+        head, rows = lane_column_rows(ix.KIND_LEFT_UP_CAUSAL, shape, mr, {})
+        return (sd.panel_height(len(rows), 0.42),
+                lambda x, y: sd.panel(s, x, y, "每条 core 负责哪些列", head, rows,
+                                      col_w=(0.95, w - 0.95), row_h=0.42, size=12.0))
+
+    props = [("任务不重复", "✓ 每个块只被派一次"),
+             ("同一轮 S1 不撞", "✓ 各核的 S1 互不相同"),
+             ("每条 core 列私有", "✓ 整列只归一条 core")]
+
+    def spec_props(w):
+        return (sd.panel_height(len(props), 0.44),
+                lambda x, y: sd.panel(s, x, y, "这个例子为什么是确定的", ("性质", "本例情形"),
+                                      props, col_w=(2.20, w - 2.20), row_h=0.44,
+                                      size=12.0))
+
+    def spec_numbers(w):
+        rows = [("任务总数", r["valid"]), ("总槽位（core x round）", r["slots"]),
+                ("idle 槽位", r["holes"]), ("虚拟高 = 2m-n+1", vm),
+                ("每核负责的真实列数", 2)]
+        return (sd.panel_height(len(rows), 0.42),
+                lambda x, y: sd.panel(s, x, y, "这个例子的数字", ("项", "值"), rows,
+                                      col_w=(w - 1.40, 1.40), row_h=0.42, size=12.0))
+
+    flow({"L": Col(LEFTX, 6.95, left_bottom, 10.16),
+          "R": Col(10.60, 5.25, 2.60, 11.72)},
+         [("为什么确定", ["L", "R"], spec_props),
+          ("每核列", ["L", "R"], spec_percore),
+          ("代价数字", ["L", "R"], spec_numbers),
+          ("重复解释", ["L", "R"], lambda w: (
+              sd.panel_height(4, 0.38),
+              lambda x, y: repeat_panel(s, x, y, shape, col_w=(2.05, w - 2.05))))])
+
+    sd.note(s, 0.73, 10.32,
+            f"形状一变，折叠几何跟着变：虚拟高从 m 变成 2m-n+1 = {vm}，但规则本身没变。",
+            w=9.70, h=0.36)
+    sd.text(s, 0.73, 11.08, "· 每个核守一条虚拟列，落到真实坐标上就是**两个 batch 各一条 S2 列**。",
+            w=9.70, h=0.32, size=15, color=sd.BODY_TEXT)
+    sd.text(s, 0.73, 11.44, f"· {k} 条核 x {mr} 轮 = {k * mr} 个槽位，正好铺满因果区的 {r['valid']} 个块。",
+            w=9.70, h=0.32, size=15, color=sd.BODY_TEXT)
     return s
 
 
@@ -906,7 +981,7 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
     def spec_other(w):
         if kind in (ix.KIND_DENSE_SWIZZLE, ix.KIND_DENSE_INDEX):
             head, rws = dense_choose_rows(kind, shape, mr)
-            title, col_w = "Dense Swizzle 还是 Dense Index？", (1.15, w - 1.15)
+            title, col_w = "Dense Swizzle 还是 Dense Index？", (1.32, w - 1.32)
         elif "cu_q" in kw and shape.groupNum > 1:
             head, rws = tnd_compare_rows(shape, mr, kw)
             title, col_w = "换成按最长 batch 对齐（示意）", (1.55, 0.85, w - 2.40)
@@ -953,10 +1028,15 @@ def main(path):
             draw_virtual_page(prs, i)
         draw_algo_page(prs, i, name, kind, shape, mr, kw, causal)
         draw_example_page(prs, i, name, kind, shape, mr, kw, causal)
+        if kind == ix.KIND_LEFT_UP_CAUSAL:      # 再加一页更大的非方形例子
+            draw_leftup_big_page(prs, i)
     sd.save(prs, path)
     errors, warns = sd.check_layout(prs)
+    cells = sd.check_cells(prs)
     print(f"wrote {path}  ({len(prs.slides._sldIdLst)} 页)")
-    print(f"版心检查: {len(errors)} 越界 / {len(warns)} 重叠")
+    print(f"版心检查: {len(errors)} 越界 / {len(warns)} 重叠 / {len(cells)} 格内顶格")
+    for c in cells[:10]:
+        print(f"  □ S{c[0]} {c[1]} r{c[2]}c{c[3]}: 文字 {c[4]} > 可用 {c[5]}  「{c[6]}」")
     for e in errors[:10]:
         print("  !", e)
     for w in warns[:10]:
