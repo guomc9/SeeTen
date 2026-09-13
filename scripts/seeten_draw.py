@@ -116,11 +116,23 @@ def _text_extents(shp):
         y = t + h - total
     else:
         y = t
+    # 自动换行的文本框：宽度不可能超出可用宽度，行数按估算宽度折算
+    wrap = tf.word_wrap is True
+    ml = Emu(tf.margin_left).inches if tf.margin_left is not None else 0.1
+    mr = Emu(tf.margin_right).inches if tf.margin_right is not None else 0.1
+    avail = max(0.3, w - ml - mr)
     for i, body in enumerate(bodies):
         if not body.strip():
             y += heights[i]
             continue
-        ew = est_text_width(body, sizes[i], mono=monos[i])
+        ew_raw = est_text_width(body, sizes[i], mono=monos[i])
+        lines = 1
+        if wrap:
+            lines = max(1, int(ew_raw / avail) + (1 if ew_raw % avail else 0))
+            heights[i] = heights[i] * lines
+            ew = min(ew_raw, avail)
+        else:
+            ew = ew_raw
         al = paras[i].alignment
         if al == PP_ALIGN.CENTER:
             x0 = l + (w - ew) / 2.0
@@ -266,8 +278,9 @@ def title(slide, body: str, x=0.73, y=0.62, size=30.0, w=13.5):
 
 
 def note(slide, x, y, body: str, w=12.0, h=0.42, size=18.0):
-    """图注长句：TNR 18 bold #F98E8B。"""
-    return text(slide, x, y, body, w=w, h=h, size=size, bold=True, color=DS_LIGHT)
+    """图注长句：TNR 18 bold #F98E8B。默认换行，避免长句横穿到隔壁栏。"""
+    return text(slide, x, y, body, w=w, h=h, size=size, bold=True, color=DS_LIGHT,
+                wrap=True)
 
 
 def arrow(slide, x1, y1, x2, y2, color=CONNECTOR, width_pt=1.0):
@@ -562,6 +575,62 @@ def hole_color():
     return dict(_HOLE)
 
 
+def lane_shades(set_name: str, lane: int, n: int, lo=0.30, hi=0.62):
+    """同一个核的 n 个任务用**同色相的深浅**区分（色相=哪个核，深浅=第几个任务）。
+
+    只靠色相区分核时，同一条核的多个任务长得一样，看不出先后；
+    叠一层明度梯度后，既能认出是哪个核，也能看出它在轮次上的推进。
+    """
+    import colorsys
+    _load_color_sets()
+    base = lane_colors(set_name, lane + 1)[lane]["fill"].lstrip("#")
+    r, g, b = (int(base[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    out = []
+    for i in range(max(1, n)):
+        t = (i / (n - 1)) if n > 1 else 0.5
+        rr, gg, bb = colorsys.hls_to_rgb(h, lo + (hi - lo) * t, s)
+        fill = "%02X%02X%02X" % (round(rr * 255), round(gg * 255), round(bb * 255))
+        out.append({"fill": fill, "text": text_on(fill)})
+    return out
+
+
+def tag_row(slide, x, y, tags, size=13.0, pad=0.16, gap=0.14, h=0.34,
+            bg="EEF2FF", border="C9D6F5"):
+    """一行标签芯片（如 layout / causal / 头型），用来标清这条规则适用的场景。
+
+    tags: [(标签, 值), ...]；返回右端 x。
+    """
+    from pptx.enum.shapes import MSO_SHAPE
+    cur = x
+    for label, value in tags:
+        body = f"{label} {value}"
+        w = est_text_width(body, size) + pad * 2
+        box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(cur),
+                                     Inches(y), Inches(w), Inches(h))
+        box.adjustments[0] = 0.25
+        box.fill.solid()
+        box.fill.fore_color.rgb = _rgb(bg)
+        box.line.color.rgb = _rgb(border)
+        box.line.width = Pt(0.75)
+        try:
+            box.shadow.inherit = False
+        except Exception:
+            pass
+        tf = box.text_frame
+        tf.word_wrap = False
+        tf.margin_left = tf.margin_right = Inches(pad)
+        tf.margin_top = tf.margin_bottom = 0
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        run = p.add_run()
+        run.text = body
+        _style_run(run, size=size, bold=False, color=TITLE_TEXT, font=LATIN,
+                   cjk_font=CJK)
+        cur += w + gap
+    return cur
+
+
 def _write_cell_lines(cell, lines, size=11.0, colors=None, font=LATIN,
                       cjk_font=CJK, line_gap=0.9):
     """单元格多行文本：每行一个段落，可逐行指定颜色。"""
@@ -585,14 +654,18 @@ def _write_cell_lines(cell, lines, size=11.0, colors=None, font=LATIN,
 
 
 def task_matrix(slide, x, y, core_labels, rows, col_w=4.2, row_h=0.52,
-                first_col_w=1.15, lane_set="cool", cell_size=11.0):
+                first_col_w=1.15, lane_set="cool", cell_size=11.0,
+                shade_count=None):
     """任务矩阵：**行 = 轮次，列 = 核**。
 
     rows: [(轮标签, [cell, ...]), ...]；cell 为 None 表示空洞，或
-          {"lines": ["S1=1 S2=2", "B=1 N2=1 G=1"], "lane": 0}
+          {"lines": [...], "lane": 0, "shade": 0}
     格内写的是"哪个轴的哪个索引"，不是裸数字。
+    shade_count 给了就按"同色相深浅"上色：色相 = 哪个核，深浅 = 第几个任务。
     """
     colors = lane_colors(lane_set, len(core_labels))
+    shades = ([lane_shades(lane_set, i, shade_count) for i in range(len(core_labels))]
+              if shade_count else None)
     cols = len(core_labels) + 1
     tbl = _plain_table(slide, x, y, len(rows) + 1, cols,
                        cell_w=int(col_w * 914400), cell_h=int(row_h * 914400))
@@ -618,7 +691,11 @@ def task_matrix(slide, x, y, core_labels, rows, col_w=4.2, row_h=0.52,
                 _fill_cell(cell, _HOLE["fill"])
                 _write_cell_lines(cell, ["空闲"], size=11.0, colors=[_HOLE["text"]])
             else:
-                col = colors[cdata["lane"] % len(colors)]
+                lane = cdata["lane"]
+                if shades:
+                    col = shades[lane % len(shades)][cdata.get("shade", 0) % shade_count]
+                else:
+                    col = colors[lane % len(colors)]
                 _fill_cell(cell, col["fill"])
                 _write_cell_lines(cell, cdata["lines"], size=cell_size,
                                   colors=[col["text"]] * len(cdata["lines"]))
@@ -765,10 +842,10 @@ def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None)
 
 def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
               cell_in=0.62, row_label="S1", col_label="S2", tick=True,
-              empty_text="空闲", label_size=13.0):
+              empty_text="空闲", label_size=13.0, shade_count=None):
     """带轴头的覆盖图：列头 `S2=1..n`、行头 `S1=1..m`、格内是内容 + lane 配色。
 
-    cells: {(r-1, c-1): (文本, lane 序号)}；缺的格子填 hole 灰 + empty_text。
+    cells: {(r-1, c-1): (文本, lane 序号[, shade 序号])}；缺的格子填 hole 灰。
     caption 只占本表宽度并紧贴其上，另加一小段竖线钉住，避免归属歧义。
     """
     tbl = _plain_table(slide, x, y, n_rows + 1, n_cols + 1,
@@ -778,6 +855,14 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
     for i in range(n_rows + 1):
         tbl.rows[i].height = Inches(cell_in)
     colors = lane_colors(lane_set, 8)
+    shade_cache = {}
+
+    def _color(lane, shade):
+        if shade_count is None:
+            return colors[lane % len(colors)]
+        if lane not in shade_cache:
+            shade_cache[lane] = lane_shades(lane_set, lane, shade_count)
+        return shade_cache[lane][shade % shade_count]
     hole = hole_color()
     for c in range(n_cols + 1):
         cell = tbl.cell(0, c)
@@ -798,8 +883,9 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
                 _fill_cell(cell, hole["fill"])
                 _write_cell_lines(cell, [empty_text], size=11.0, colors=[hole["text"]])
             else:
-                label, lane = got
-                col = colors[lane % len(colors)]
+                label, lane = got[0], got[1]
+                shade = got[2] if len(got) > 2 else 0
+                col = _color(lane, shade)
                 _fill_cell(cell, col["fill"])
                 _write_cell_lines(cell, [label], size=label_size, colors=[col["text"]])
     if caption:
