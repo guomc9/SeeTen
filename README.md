@@ -168,9 +168,10 @@ Main API:
 | `block_grid` / `tensor_block` | Tile grid / single tile |
 | `spec_table` / `round_table` / `accum_table` / `gantt_table` | Table archetypes |
 | `task_matrix` | Task matrix (**rows = rounds, columns = cores**) |
+| `trace_table` | Transposed view (**rows = cores, columns = rounds**): which column each core holds |
 | `axis_grid` | (S1, S2) coverage grid with axis headers |
 | `pseudocode_block` | Pseudocode block |
-| `panel` | Small captioned table (fills whitespace: comparison / numbers / intermediate form) |
+| `panel` / `panel_height` | Small captioned table (fills whitespace: comparison / numbers / intermediate form) and its height, to decide where it fits before drawing it |
 | `arrow` / `axis_arrow` | Connectors / axis arrows |
 | `lane_colors` / `text_on` | Lane color presets / pick text color from fill luminance |
 | `check_layout` | Hard bounds check (text by real extent, tables by real width/height) |

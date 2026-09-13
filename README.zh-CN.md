@@ -161,9 +161,10 @@ print(check_layout(prs))         # 收尾必须 0 越界 0 重叠
 | `block_grid` / `tensor_block` | 块网格、单个分块 |
 | `spec_table` / `round_table` / `accum_table` / `gantt_table` | 各类表格原型 |
 | `task_matrix` | 任务矩阵（**行 = 轮，列 = 核**） |
+| `trace_table` | 转置视角（**行 = 核，列 = 轮**）：每条核这一轮守在哪条列 |
 | `axis_grid` | 带轴头的 (S1, S2) 覆盖图 |
 | `pseudocode_block` | 伪代码块 |
-| `panel` | 带表外标题的小表（填空白用：对比/数字/中间形态） |
+| `panel` / `panel_height` | 带表外标题的小表（填空白用：对比/数字/中间形态）与它的高度（先算高度再决定放哪栏） |
 | `arrow` / `axis_arrow` | 连接线、轴箭头 |
 | `lane_colors` / `text_on` | lane 配色预设、按底色亮度自动选字色 |
 | `check_layout` | 版心硬检查（文字按实际占位、表格按真实框） |
