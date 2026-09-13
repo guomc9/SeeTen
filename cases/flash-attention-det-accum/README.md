@@ -10,7 +10,7 @@ atomic add into shared memory as soon as it finishes — who adds first is decid
 scheduler, and floating-point addition is not associative, so results can differ between runs.
 
 This scheme takes the **schedule-first** route: assign tasks up front so that one core owns a
-single KV column for several consecutive rounds and rotates S1 inside it. dK/dV are then
+single KV column for several consecutive rounds and walks through S1 inside it. dK/dV are then
 accumulated by a single core in program order, which makes the result deterministic by
 construction.
 
@@ -24,6 +24,8 @@ construction.
 | Pseudocode first | Every page leads with pseudocode written with concrete names, then the example |
 | Two-level color | Hue = which batch, shade of the same hue = which KV column (S2); S1 does not drive color |
 | Transposed trace table | Rows are cores, columns are rounds, cell = the column that core holds that round — reads "why the same S2 shows up on several cores" straight off the page |
+| Concept page for an abstraction | The fold's "virtual column" gets its own page: two real triangles -> one rectangle, a table of which real cells each virtual column is made of, and a plain-vs-virtual comparison |
+| Rule-selection table | Dense Swizzle vs Dense Index compared by which axis the low task-id digit walks, and when to pick each |
 | Fill whitespace with real tables | Comparison table (which rule applies to this shape), cost numbers, per-core column list; placed by priority into whichever column has room |
 | Ownership labels hug their table | `B=1`, `N2=1`, `G=1` span only their own grid and sit right on top of it |
 
@@ -33,7 +35,7 @@ construction.
 |---|---|
 | `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
 | `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
-| `out/v4-index-schedules.pptx` | The generated pages (16: overview + axis/causal walkthrough + 7 methods x 2) |
+| `out/v4-index-schedules.pptx` | The generated pages (17: overview + axis walkthrough + virtual-column page + 7 methods x 2) |
 
 ```bash
 python index_schedules.py          # check the seven algorithms first (expect zero conflicts)
@@ -48,8 +50,8 @@ given (round, core) is always the same, which is exactly where determinism comes
 
 | # | Algorithm | In one sentence | Example size | Result |
 |---|---|---|---|---|
-| 1 | Column-private swizzle | Low digit is the KV column: one core owns a column for m rounds and rotates S1 inside it | k=2, 3×3 tiles, 2 batches | 9 rounds, filled; 3 columns per core |
-| 2 | Batch-first rotation | Low digit is the batch: cores land on different batches in the same round, so core count may exceed the S1 tile count | k=4, 2×2 tiles, 2 batches | filled in 2 rounds |
+| 1 | Column-private swizzle | Low digit is the KV column: one core owns a column for m rounds and walks S1 inside it | k=2, 3×3 tiles, 2 batches | 9 rounds, filled; 3 columns per core |
+| 2 | Batch-first splitting | Low digit is the batch: cores land on different batches in the same round, so core count may exceed the S1 tile count | k=4, 2×2 tiles, 2 batches | filled in 2 rounds |
 | 3 | Causal folding | Two adjacent batches are folded into one full rectangle; the two triangles fit exactly | k=2, 3×3 tiles, 2 batches | 12 tasks, zero idle slots |
 | 4 | Left-up causal folding | Its own geometry when S1 is longer than S2; virtual height = 2m-n+1 | k=2, 3×2 tiles, 2 batches | 10 tasks, 4 need masking |
 | 5 | GQA slicing | One core owns R consecutive task ids; a gcd correction keeps same-round keys distinct | k=2, 2×2 tiles, group 2 | 4 rounds, 8 tasks |
@@ -65,7 +67,7 @@ given (round, core) is always the same, which is exactly where determinism comes
 2. **No S1 collision within a round** — no two cores write the same output tile in the same
    round, which is what allows the cross-core atomic add to be ordered;
 3. **Column-private** (swizzle-style algorithms) — a core owns one column across consecutive
-   rounds and rotates S1 inside it without repetition.
+   rounds and walks through S1 inside it without repetition.
 
 All seven pass at the sizes above (0 duplicates, 0 conflicts). The GQA-style variants (5 and 7)
 are deliberately *not* column-private: they rely on flattened slicing plus distinct same-round

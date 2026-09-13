@@ -22,7 +22,7 @@ KIND_GQA_DENSE = 5            # GQA：任务切片 + gcd 修正
 KIND_TND_DENSE = 6            # 变长 batch（MHA）：逐批列私有
 KIND_TND_GQA_DENSE = 7        # 变长 batch（GQA）：按面积展平
 
-KIND_CN = {KIND_DENSE_SWIZZLE: "列私有 swizzle", KIND_DENSE_INDEX: "批优先旋转",
+KIND_CN = {KIND_DENSE_SWIZZLE: "列私有 swizzle", KIND_DENSE_INDEX: "先分批再分列",
            KIND_CAUSAL_SWIZZLE: "因果折叠", KIND_LEFT_UP_CAUSAL: "左上因果折叠",
            KIND_GQA_DENSE: "GQA 切片", KIND_TND_DENSE: "变长列私有",
            KIND_TND_GQA_DENSE: "变长展平"}
@@ -90,7 +90,7 @@ class Coord:
 # ---------------------------------------------------------------- 七种算法
 
 def cal_dense_swizzle_index(k, m, n, b, j, r, c: Raw):
-    """列私有 swizzle：一条 lane 在 m 轮内独占一条 KV 列，列内旋转 S1。"""
+    """列私有 swizzle：一条 lane 在 m 轮内独占一条 KV 列，列内把 S1 逐行走一遍。"""
     c.w = 0
     j, r = j - 1, r - 1
     k = min(k, b * m)
@@ -98,7 +98,7 @@ def cal_dense_swizzle_index(k, m, n, b, j, r, c: Raw):
         return
     p = (r // m) * k + j          # 每个 m 轮跨度内 p 固定
     w, y = p // n, p % n          # 低位 = KV 列
-    x = (y + r) % m               # 列内 S1 旋转
+    x = (y + r) % m               # 列内 S1 往下走一行
     if x >= m:
         x -= m
     w, x, y = w + 1, x + 1, y + 1
@@ -107,7 +107,7 @@ def cal_dense_swizzle_index(k, m, n, b, j, r, c: Raw):
 
 
 def cal_dense_index(k, m, n, b, j, r, c: Raw):
-    """批优先旋转：低位是批，所以核数可以超过 S1 块数。"""
+    """先分批再分列：task id 低位是批，所以核数可以超过 S1 块数。"""
     c.w = 0
     k = min(k, b * m)
     if j > k:
@@ -379,7 +379,7 @@ def cases():
     s = Shape(batch=2, qSeqLen=384, kvSeqLen=384, qHeadNum=1, kvHeadNum=1, coreNum=2)
     out.append(("列私有 swizzle", KIND_DENSE_SWIZZLE, s, 9, {}, False))
     s = Shape(batch=2, qSeqLen=256, kvSeqLen=256, qHeadNum=1, kvHeadNum=1, coreNum=4)
-    out.append(("批优先旋转", KIND_DENSE_INDEX, s, 2, {}, False))
+    out.append(("先分批再分列", KIND_DENSE_INDEX, s, 2, {}, False))
     s = Shape(batch=2, qSeqLen=384, kvSeqLen=384, qHeadNum=1, kvHeadNum=1, coreNum=2)
     out.append(("因果折叠", KIND_CAUSAL_SWIZZLE, s, 6, {}, True))
     s = Shape(batch=2, qSeqLen=384, kvSeqLen=256, qHeadNum=1, kvHeadNum=1, coreNum=2)

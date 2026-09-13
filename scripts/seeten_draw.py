@@ -568,9 +568,9 @@ def hole_color():
 
 
 def lane_shades(set_name: str, lane: int, n: int, lo=0.30, hi=0.62):
-    """同一个核的 n 个任务用**同色相的深浅**区分（色相=哪个核，深浅=第几个任务）。
+    """同一个核的 n 个任务用**同一种颜色的深浅**区分（颜色 = 哪条 lane，颜色深浅 = 第几个任务）。
 
-    只靠色相区分核时，同一条核的多个任务长得一样，看不出先后；
+    只靠只用颜色区分 lane 时，同一条 lane 的多个任务长得一样，看不出先后；
     叠一层明度梯度后，既能认出是哪个核，也能看出它在轮次上的推进。
     """
     import colorsys
@@ -653,7 +653,7 @@ def task_matrix(slide, x, y, core_labels, rows, col_w=4.2, row_h=0.52,
     rows: [(轮标签, [cell, ...]), ...]；cell 为 None 表示空洞，或
           {"lines": [...], "lane": 0, "shade": 0}
     格内写的是"哪个轴的哪个索引"，不是裸数字。
-    shade_count 给了就按"同色相深浅"上色：色相 = 哪个核，深浅 = 第几个任务。
+    shade_count 给了就按"同同色深浅"上色：颜色 = 哪条 lane，颜色深浅 = 第几个任务。
     """
     colors = lane_colors(lane_set, len(core_labels))
     shades = ([lane_shades(lane_set, i, shade_count) for i in range(len(core_labels))]
@@ -895,12 +895,17 @@ def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None,
 
 def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
               cell_in=0.62, row_label="S1", col_label="S2", tick=True,
-              empty_text="空闲", label_size=13.0, shade_count=None):
+              empty_text="空闲", label_size=13.0, shade_count=None,
+              head_size=12.0):
     """带轴头的覆盖图：列头 `S2=1..n`、行头 `S1=1..m`、格内是内容 + lane 配色。
 
     cells: {(r-1, c-1): (文本, lane 序号[, shade 序号])}；缺的格子填 hole 灰。
     caption 只占本表宽度并紧贴其上，另加一小段竖线钉住，避免归属歧义。
+    row_label / col_label 里写 `{v}` 就按它排版（如 `虚拟行{v}`），
+    否则默认按 `标签=序号` 写；轴头文字比格内文字小一号时用 head_size。
     """
+    def _axis_label(label, v):
+        return label.format(v=v) if "{v}" in label else f"{label}={v}"
     tbl = _plain_table(slide, x, y, n_rows + 1, n_cols + 1,
                        cell_w=int(cell_in * 914400), cell_h=int(cell_in * 914400))
     for i in range(n_cols + 1):
@@ -922,12 +927,14 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
         _cell_border(cell)
         if c:
             _fill_cell(cell, ON_BLOCK)
-            _write_cell_lines(cell, [f"{col_label}={c}"], size=12.0, colors=[TITLE_TEXT])
+            _write_cell_lines(cell, [_axis_label(col_label, c)], size=head_size,
+                              colors=[TITLE_TEXT])
     for r in range(1, n_rows + 1):
         cell = tbl.cell(r, 0)
         _cell_border(cell)
         _fill_cell(cell, ON_BLOCK)
-        _write_cell_lines(cell, [f"{row_label}={r}"], size=12.0, colors=[TITLE_TEXT])
+        _write_cell_lines(cell, [_axis_label(row_label, r)], size=head_size,
+                          colors=[TITLE_TEXT])
         for c in range(1, n_cols + 1):
             cell = tbl.cell(r, c)
             _cell_border(cell)
