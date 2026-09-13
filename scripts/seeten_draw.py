@@ -818,10 +818,14 @@ def check_layout(prs: Presentation, slide_index=None):
 
 # ---------------------------------------------------------------- 通用小构件
 
-def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None):
-    """带表外标题的小表（标题不占表格空间）。返回底边 y。"""
+def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None,
+          gap=0.44):
+    """带表外标题的小表（标题不占表格空间）。返回底边 y。
+
+    gap：标题与表格之间的间距 —— 表块和文字不要贴太近，留够呼吸。
+    """
     text(slide, x, y, head, w=(w or sum(col_w) + 0.4), h=0.30, size=15.0, bold=True)
-    tbl = _plain_table(slide, x, y + 0.36, len(rows) + 1, len(header),
+    tbl = _plain_table(slide, x, y + gap, len(rows) + 1, len(header),
                        cell_w=int(col_w[0] * 914400), cell_h=int(row_h * 914400))
     for i, cw in enumerate(col_w):
         tbl.columns[i].width = Inches(cw)
@@ -837,7 +841,7 @@ def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None)
             cell = tbl.cell(r, c)
             _cell_border(cell)
             _write_cell_lines(cell, [str(val)], size=size, colors=[TITLE_TEXT])
-    return y + 0.36 + (len(rows) + 1) * row_h
+    return y + gap + (len(rows) + 1) * row_h
 
 
 def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
@@ -887,12 +891,14 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
                 shade = got[2] if len(got) > 2 else 0
                 col = _color(lane, shade)
                 _fill_cell(cell, col["fill"])
-                _write_cell_lines(cell, [label], size=label_size, colors=[col["text"]])
+                lines = str(label).split("\n")          # 允许格内两行
+                _write_cell_lines(cell, lines, size=label_size,
+                                  colors=[col["text"]] * len(lines))
     if caption:
-        text(slide, x + 0.04, y - 0.40, caption, w=(n_cols + 1) * cell_in, h=0.30,
+        text(slide, x + 0.04, y - 0.46, caption, w=(n_cols + 1) * cell_in, h=0.30,
              size=14.0, bold=True, color=TITLE_TEXT)
         if tick:
-            arrow(slide, x + 0.10, y - 0.08, x + 0.10, y, width_pt=0.75, color=BORDER)
+            arrow(slide, x + 0.10, y - 0.11, x + 0.10, y, width_pt=0.75, color=BORDER)
     return tbl
 
 
