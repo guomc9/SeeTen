@@ -249,8 +249,14 @@ def dense_choose_rows(kind, shape, mr):
     return ("判据", "两条规则的区别"), rows
 
 
-def applicability_rows(kind, shape, mr):
-    m, n, b, g, k = shape.M(), shape.N(), shape.Bh(), shape.groupNum, shape.coreNum
+def applicability_rows(kind, shape, mr, kw=None):
+    kw = kw or {}
+    if "cu_q" in kw:              # 变长 batch：S1/S2 块数逐批不同，取最大的那一批来对比
+        m = max(batch_mn(shape, kw, b)[0] for b in range(shape.batch))
+        n = max(batch_mn(shape, kw, b)[1] for b in range(shape.batch))
+    else:
+        m, n = shape.M(), shape.N()
+    b, g, k = shape.Bh(), shape.groupNum, shape.coreNum
     causal = kind in (ix.KIND_CAUSAL_SWIZZLE, ix.KIND_LEFT_UP_CAUSAL)
     cands = [
         (ix.KIND_DENSE_SWIZZLE, "Dense Swizzle",
@@ -769,7 +775,7 @@ def draw_algo_page(prs, num, name, kind, shape, mr, kw, causal):
             head, rws = tnd_compare_rows(shape, mr, kw)
             title, col_w = "换成按最长 batch 对齐（示意）", (1.55, 0.85, w - 2.40)
         else:
-            head, rws = applicability_rows(kind, shape, mr)
+            head, rws = applicability_rows(kind, shape, mr, kw)
             title, col_w = "同一形状下其它规则能不能用", (1.35, 0.95, w - 2.30)
         return (sd.panel_height(len(rws), 0.46),
                 lambda x, y: sd.panel(s, x, y, title, head, rws, col_w=col_w,
@@ -986,7 +992,7 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
             head, rws = tnd_compare_rows(shape, mr, kw)
             title, col_w = "换成按最长 batch 对齐（示意）", (1.55, 0.85, w - 2.40)
         else:
-            head, rws = applicability_rows(kind, shape, mr)
+            head, rws = applicability_rows(kind, shape, mr, kw)
             title, col_w = "同一形状下其它规则能不能用", (1.35, 0.95, w - 2.30)
         return (sd.panel_height(len(rws), 0.46),
                 lambda x, y: sd.panel(s, x, y, title, head, rws, col_w=col_w,
