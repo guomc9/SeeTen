@@ -4,7 +4,7 @@
 duration = Task Duration；MAC / MTE2 / MTE1 / fixpipe = cube 侧各口；
 scal_c / scal_v = AIC / AIV 标量口（解码、循环、同步）；vec = AIV 向量；
 cube% = cube 利用率。opst = FlashAttentionScoreGrad（--det 区分确定性实现）；
-ours = FlashAttentionV3Bwd950。实测加速比（min-of-25，benchmark）见 10.3 引用。
+ours = FlashAttentionV3Bwd950。实测加速比（median of 25，benchmark）见 10.3 引用。
 """
 
 COLS = ("duration", "MAC", "MTE2", "MTE1", "fixpipe", "scal_c", "vec", "scal_v", "cube%")

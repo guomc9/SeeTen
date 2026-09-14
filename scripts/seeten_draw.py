@@ -202,7 +202,8 @@ def _set_cjk_font(run, typeface: str) -> None:
         el.set("typeface", typeface)
 
 
-def _style_run(run, size=None, bold=None, color=None, font=None, cjk_font=None) -> None:
+def _style_run(run, size=None, bold=None, color=None, font=None, cjk_font=None,
+               underline=None) -> None:
     f = run.font
     if font:
         f.name = font
@@ -212,6 +213,8 @@ def _style_run(run, size=None, bold=None, color=None, font=None, cjk_font=None) 
         f.bold = bold
     if color:
         f.color.rgb = _rgb(color)
+    if underline is not None:
+        f.underline = underline
     if cjk_font:
         _set_cjk_font(run, cjk_font)
 
@@ -236,32 +239,38 @@ EMPH_COLOR = "D83931"      # 行内强调（`==…==`）默认用的颜色
 
 
 def _rich_segments(body: str, bold, color):
-    """把 `**粗**` / `==强调==` 解析成 (文本, 是否粗, 颜色) 片段，其余原样。
+    """把 `**粗**` / `==强调==` / `__下划线__` 解析成 (文本, 粗, 颜色, 下划线) 片段。
 
-    页面上不会出现星号或等号 —— 它们是**输入**的标记，不是要渲染的内容。
+    页面上不会出现星号 / 等号 / 双下划线 —— 它们是**输入**的标记，不是要渲染的内容。
+    `__下划线__` 用来标"达标 / 满足阈值"的格（如 ratio ≥ 0.8），与加粗（最优值）共用。
     """
     out, buf, i = [], "", 0
     while i < len(body):
-        if body.startswith("**", i):
-            j = body.find("**", i + 2)
-            if j > 0:
-                if buf:
-                    out.append((buf, bold, color)); buf = ""
-                out.append((body[i + 2:j], True, color))
-                i = j + 2
+        hit = False
+        for mark, kind in (("**", "bold"), ("==", "emph"), ("__", "ul")):
+            if not body.startswith(mark, i):
                 continue
-        if body.startswith("==", i):
-            j = body.find("==", i + 2)
-            if j > 0:
-                if buf:
-                    out.append((buf, bold, color)); buf = ""
-                out.append((body[i + 2:j], True, EMPH_COLOR))
-                i = j + 2
+            j = body.find(mark, i + 2)
+            if j <= 0:
                 continue
+            if buf:
+                out.append((buf, bold, color, False)); buf = ""
+            inner = body[i + 2:j]
+            if kind == "bold":
+                out.append((inner, True, color, False))
+            elif kind == "emph":
+                out.append((inner, True, EMPH_COLOR, False))
+            else:
+                out.append((inner, bold, color, True))
+            i = j + 2
+            hit = True
+            break
+        if hit:
+            continue
         buf += body[i]
         i += 1
     if buf:
-        out.append((buf, bold, color))
+        out.append((buf, bold, color, False))
     return out
 
 
@@ -281,15 +290,16 @@ def text(slide, x, y, body: str, w=4.0, h=0.42, size=20.0, bold=False,
     tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
     p = tf.paragraphs[0]
     p.alignment = align
-    plain = body.replace("**", "").replace("==", "")       # 估宽按去掉标记的文本算
-    for seg, seg_bold, seg_color in _rich_segments(body, bold, color):
+    plain = (body.replace("**", "").replace("==", "").replace("__", "")
+             if not mono else body)               # 估宽按去掉标记的文本算
+    for seg, seg_bold, seg_color, seg_ul in _rich_segments(body, bold, color):
         for piece, is_cjk in (_split_scripts(seg) if (mixed_scripts and font == LATIN
                                                        and cjk_font) else [(seg, False)]):
             run = p.add_run()
             run.text = piece
             _style_run(run, size=size, bold=seg_bold, color=seg_color,
                        font=(cjk_font if (is_cjk and cjk_font) else font),
-                       cjk_font=cjk_font)
+                       cjk_font=cjk_font, underline=seg_ul)
     lines = plain.split("\n")
     est_w = max(est_text_width(ln, size, mono=mono) for ln in lines)
     if wrap:
@@ -424,12 +434,13 @@ def _write_cell(cell, body: str, size=17.5, bold=True, color=ON_BLOCK,
     for i, ln in enumerate(lines):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.alignment = PP_ALIGN.CENTER
-        for seg, seg_bold, seg_color in _rich_segments(ln, bold, color):
+        for seg, seg_bold, seg_color, seg_ul in _rich_segments(ln, bold, color):
             for piece, is_cjk in _split_scripts(seg):
                 run = p.add_run()
                 run.text = piece
                 _style_run(run, size=size, bold=seg_bold, color=seg_color,
-                           font=(cjk_font if is_cjk else font), cjk_font=cjk_font)
+                           font=(cjk_font if is_cjk else font), cjk_font=cjk_font,
+                           underline=seg_ul)
 
 
 # ---------------------------------------------------------------- 六种表式
@@ -698,12 +709,13 @@ def _write_cell_lines(cell, lines, size=11.0, colors=None, font=LATIN,
         p.alignment = PP_ALIGN.CENTER
         p.line_spacing = line_gap
         col = (colors[i] if colors else None) or ON_BLOCK
-        for seg, seg_bold, seg_color in _rich_segments(body, False, col):
+        for seg, seg_bold, seg_color, seg_ul in _rich_segments(body, False, col):
             for piece, is_cjk in _split_scripts(seg):
                 run = p.add_run()
                 run.text = piece
                 _style_run(run, size=size, bold=seg_bold, color=seg_color,
-                           font=(cjk_font if is_cjk else font), cjk_font=cjk_font)
+                           font=(cjk_font if is_cjk else font), cjk_font=cjk_font,
+                           underline=seg_ul)
 
 
 def task_matrix(slide, x, y, core_labels, rows, col_w=4.2, row_h=0.52,

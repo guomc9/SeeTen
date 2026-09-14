@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -312,6 +313,9 @@ def main(pptx_path):
         xs = [x for x in xs if x is not None and x > 0]
         return _m.exp(sum(_m.log(x) for x in xs) / len(xs)) if xs else float("nan")
 
+    def _trunc2(v):
+        return math.floor(v * 100 + 1e-9) / 100.0
+
     def _ratio(num, den):
         return [a / b if (a and b) else None for a, b in zip(num, den)]
 
@@ -330,7 +334,9 @@ def main(pptx_path):
         return _gm([v for v in _gvals(vals, lay, sz) if v is not None])
 
     def _mv(v, spec="{:.1f}"):
-        return "—" if v is None else spec.format(v)
+        if v is None:
+            return "—"
+        return spec.format(_trunc2(v) if spec.endswith(".2f}") else v)
 
     checks_tables, perf_texts, slide_tables = [], [], []
     for sl in prs.slides:
@@ -403,7 +409,7 @@ def main(pptx_path):
                                         _mv(det_ratio[j], "{:.2f}")],
                              [("GM", "", f"{_gm_lay(pm.OURS_DET, lay, sz):.1f}",
                                f"{_gm_lay(pm.OPST_DET, lay, sz):.1f}",
-                               f"{_gm_lay(det_ratio, lay, sz):.2f}"),
+                               f"{_trunc2(_gm_lay(det_ratio, lay, sz)):.2f}"),
                               ("pass", "", "", "",
                                f"{_rate(_gvals(det_ratio, lay, sz), 0.8):.0%}")])
     for i, sz in enumerate(SIZES):
@@ -415,7 +421,7 @@ def main(pptx_path):
                                         _mv(nd_ratio[j], "{:.2f}")],
                              [("GM", "", f"{_gm_lay(pm.OURS_ND, lay, sz):.1f}",
                                f"{_gm_lay(pm.OPST_ND, lay, sz):.1f}",
-                               f"{_gm_lay(nd_ratio, lay, sz):.2f}"),
+                               f"{_trunc2(_gm_lay(nd_ratio, lay, sz)):.2f}"),
                               ("pass", "", "", "",
                                f"{_rate(_gvals(nd_ratio, lay, sz), 0.8):.0%}")])
 
@@ -432,7 +438,7 @@ def main(pptx_path):
         return "—" if v is None else f"{v:.1f}"
 
     def _r(v):
-        return "—" if v is None else f"{v:.2f}"
+        return "—" if v is None else f"{_trunc2(v):.2f}"
 
     if len(detail) != 2:
         fail(f"性能明细表数量 {len(detail)} != 2")
@@ -454,8 +460,8 @@ def main(pptx_path):
                       f"{_gm([v for v in (ond_[i] for i in idxs) if v]):.1f}",
                       f"{_gm([v for v in (pd_[i] for i in idxs) if v]):.1f}",
                       f"{_gm([v for v in (pnd_[i] for i in idxs) if v]):.1f}",
-                      f"{_gm([det_r[i] for i in idxs]):.2f}",
-                      f"{_gm([nd_r[i] for i in idxs]):.2f}"]
+                      f"{_trunc2(_gm([det_r[i] for i in idxs])):.2f}",
+                      f"{_trunc2(_gm([nd_r[i] for i in idxs])):.2f}"]
             pass_exp = ["", "", "", "", "",
                         f"{_rate([det_r[i] for i in idxs], 0.8):.0%}",
                         f"{_rate([nd_r[i] for i in idxs], 0.8):.0%}"]
@@ -503,7 +509,7 @@ def main(pptx_path):
     check_data_table(pf.BSND_ROWS, "10.1 BSND profiling 表")
     check_data_table(pf.TND_ROWS, "10.2 TND profiling 表")
 
-    t = find_tables(("观察", "证据（10.1 / 10.2 数据 + 实测 min-of-25）", "判断", "行动"))
+    t = find_tables(("观察", "证据（10.1 / 10.2 数据 + 实测 median of 25）", "判断", "行动"))
     if t:
         ok(f"10.3 结论表: {len(t[0].rows) - 1} 条观察")
     else:

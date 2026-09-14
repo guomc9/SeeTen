@@ -1102,7 +1102,7 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
 
 
 # ------------------------------------------------------------------ 性能对比
-# 口径：msprof device 侧 kernel 时间（Task Duration 最小值，warmup 5 + repeat 20），
+# 口径：msprof device 侧 kernel 时间（Task Duration 中位数，warmup 5 + repeat 20），
 # 不是 event record 端到端计时。数据见 perf_matrix.py：
 #   本仓库 = det-cmp-v3-swizzle（合并 integration/FAG-V3-A5 cube Optimize 后）；
 #   参考仓库 = opst（det 走 torch.use_deterministic_algorithms(True)）。
@@ -1273,7 +1273,7 @@ def draw_perf_detail_page(prs):
     for num, lay in (("9.10", "BSND"), ("9.11", "TND")):
         idxs = _layout_idx(lay)
         s = sd.blank_slide(prs)
-        sd.title(s, f"{num}. vs. ops-transformer 性能对比明细：{lay}（核时 μs，min of 25）",
+        sd.title(s, f"{num}. vs. ops-transformer 性能对比明细：{lay}（核时 μs，median of 25）",
                  y=0.62)
         sd.text(s, 0.73, 1.22,
                 f"{len(idxs)} case · 本仓库 det/nd vs. ops-transformer（opst）det/nd · "
@@ -1286,7 +1286,7 @@ def draw_perf_detail_page(prs):
             da, db = _best_pair(od[i], pd[i])
             na, nb = _best_pair(ond[i], pnd[i])
             rows.append((f"#{i+1}", pm.SHAPE[i], da, na, db, nb,
-                         r(det_ratio[i]), r(nd_ratio[i])))
+                         _ratio_mark(det_ratio[i]), _ratio_mark(nd_ratio[i])))
         footers = []
         if lay == "TND":                     # 最后一页补 GM 与总体 pass
             g_od, g_pd = _best_pair(gm([od[i] for i in idxs]),
@@ -1295,8 +1295,8 @@ def draw_perf_detail_page(prs):
                                     gm([pnd[i] for i in idxs]))
             footers = [
                 ("GM", "", g_od, g_on, g_pd, g_pn,
-                 f"{gm([det_ratio[i] for i in idxs]):.2f}",
-                 f"{gm([nd_ratio[i] for i in idxs]):.2f}"),
+                 _ratio_mark(gm([det_ratio[i] for i in idxs])),
+                 _ratio_mark(gm([nd_ratio[i] for i in idxs]))),
                 ("pass", "", "", "", "", "",
                  f"{_rate([det_ratio[i] for i in idxs], 0.8):.0%}",
                  f"{_rate([nd_ratio[i] for i in idxs], 0.8):.0%}"),
@@ -1310,10 +1310,25 @@ def draw_perf_detail_page(prs):
                       row_h=[row_h] * n_rows, zebra=True,
                       size=size_c, header_size=size_c + 0.6)
         sd.note(s, 0.73, min(1.72 + n_rows * row_h + 0.30, 11.30),
-                "数值 = msprof Task Duration 最小值（device 侧），非 event record；"
-                "加粗 = det / nd 各自更优；空缺 = opst 无法运行（mask Skv=2048）。",
+                "数值 = msprof Task Duration 中位数（device 侧），非 event record；"
+                "加粗 = det / nd 各自更优；下划线 = ratio ≥ 0.8；"
+                "空缺 = opst 无法运行（mask Skv=2048）。",
                 w=15.2, h=0.45)
     return s
+
+
+def _trunc2(v):
+    """截断到两位小数：让显示值与阈值判定（≥0.8 / ≥1.0）严格一致
+    —— 0.7997 显示 0.79（不达标、图上灰色），不会显示成 0.80。"""
+    return math.floor(v * 100 + 1e-9) / 100.0
+
+
+def _ratio_mark(v):
+    """比值格：≥0.8（达标）加下划线；截断显示；None 显示 —。"""
+    if v is None:
+        return "—"
+    t = f"{_trunc2(v):.2f}"
+    return f"__{t}__" if v >= 0.8 else t
 
 
 def _best_pair(a, b, fmt="{:.1f}"):
@@ -1340,7 +1355,9 @@ def draw_perf_pages(prs):
     nd_ratio = _ratio(pnd, ond)         # opst-nd / ours-nd
 
     def mv(v, spec="{:.1f}"):
-        return "—" if v is None else spec.format(v)
+        if v is None:
+            return "—"
+        return spec.format(_trunc2(v) if spec.endswith(".2f}") else v)
 
     def gm_lay(vals, lay, sz):
         return _gm([v for v in _group_vals(vals, lay, sz) if v is not None])
@@ -1362,7 +1379,7 @@ def draw_perf_pages(prs):
             [("ours det/nd", pen_ours, sd.PERF_SELF),
              ("opst det/nd", pen_opst, sd.PERF_REF)],
             "横轴 = case 序号 · 数据 size（MB，bf16：q/out/dout + k/v）· "
-            "倍率 = det / nd · 虚线 = 1.0；shape 见下表；核时为 msprof Task Duration 最小值",
+            "倍率 = det / nd · 虚线 = 1.0；shape 见下表；核时为 msprof Task Duration 中位数",
             ("ours det/nd", "opst det/nd"), cell, footers,
             f"结论：{sz} shape 上本仓库 det/nd = {gm_lay(pen_ours, 'BSND', sz):.2f}×（BSND）/ "
             f"{gm_lay(pen_ours, 'TND', sz):.2f}×（TND）；opst 为 "
@@ -1373,19 +1390,19 @@ def draw_perf_pages(prs):
     for i, sz in enumerate(SIZES):
         def cell(ci, r=det_ratio, a=od, b=pd):
             da, db = _best_pair(a[ci], b[ci])
-            return [da, db, mv(r[ci], "{:.2f}")]
+            return [da, db, _ratio_mark(r[ci])]
 
         def footers(lay, sz=sz):
             ga, gb = _best_pair(gm_lay(od, lay, sz), gm_lay(pd, lay, sz))
-            return [("GM", "", ga, gb,
-                     f"{gm_lay(det_ratio, lay, sz):.2f}"),
+            return [("GM", "", ga, gb, _ratio_mark(gm_lay(det_ratio, lay, sz))),
                     ("pass", "", "", "",
                      f"{_rate(_group_vals(det_ratio, lay, sz), 0.8):.0%}")]
 
         draw_perf_page(
             prs, f"9.{i+4}", f"性能对比：det-vs-det（{sz} shape）",
             f"比值 = opst-det / 本仓库-det（≥ 0.8 = 达标）· {sz} shape 组 · "
-            "核时为 msprof kernel 时间（device 侧）· 表内加粗 = 更优的 det 核时",
+            "核时为 msprof kernel 时间（device 侧）· 加粗 = 更优的 det 核时 · "
+            "下划线 = ratio ≥ 0.8（达标）",
             sz,
             [("opst-det / ours-det", det_ratio, sd.PERF_SELF)],
             "横轴 = case 序号 · 数据 size（MB，bf16：q/out/dout + k/v）· "
@@ -1400,19 +1417,19 @@ def draw_perf_pages(prs):
     for i, sz in enumerate(SIZES):
         def cell(ci, r=nd_ratio, a=ond, b=pnd):
             da, db = _best_pair(a[ci], b[ci])
-            return [da, db, mv(r[ci], "{:.2f}")]
+            return [da, db, _ratio_mark(r[ci])]
 
         def footers(lay, sz=sz):
             ga, gb = _best_pair(gm_lay(ond, lay, sz), gm_lay(pnd, lay, sz))
-            return [("GM", "", ga, gb,
-                     f"{gm_lay(nd_ratio, lay, sz):.2f}"),
+            return [("GM", "", ga, gb, _ratio_mark(gm_lay(nd_ratio, lay, sz))),
                     ("pass", "", "", "",
                      f"{_rate(_group_vals(nd_ratio, lay, sz), 0.8):.0%}")]
 
         draw_perf_page(
             prs, f"9.{i+7}", f"性能对比：nd-vs-nd（{sz} shape）",
             f"比值 = opst-nd / 本仓库-nd（≥ 0.8 = 达标）· {sz} shape 组 · "
-            "核时为 msprof kernel 时间（device 侧）· 表内加粗 = 更优的 nd 核时",
+            "核时为 msprof kernel 时间（device 侧）· 加粗 = 更优的 nd 核时 · "
+            "下划线 = ratio ≥ 0.8（达标）",
             sz,
             [("opst-nd / ours-nd", nd_ratio, sd.PERF_SELF)],
             "横轴 = case 序号 · 数据 size（MB，bf16：q/out/dout + k/v）· "
@@ -1440,14 +1457,17 @@ def draw_profiling_pages(prs):
     def data_page(title, shape_desc, rows, note):
         s = sd.blank_slide(prs)
         sd.title(s, title, y=0.62)
-        sd.text(s, 0.73, 1.26,
-                "device 侧用时 µs；duration = Task Duration；MAC / MTE2 / MTE1 / fixpipe "
-                "= cube 侧各口；scal_c / scal_v = AIC / AIV 标量口（解码、循环、同步）；"
-                "vec = AIV 向量；cube% = cube 利用率",
-                w=15.2, h=0.34, size=12.0, color=sd.BODY_TEXT)
-        sd.text(s, 0.73, 1.76, shape_desc, w=15.0, h=0.32, size=13.0, bold=True,
+        sd.text(s, 0.73, 1.20,
+                "device 侧用时 µs；duration = Task Duration（单次 profiled run，含采集开销，"
+                "看结构与相对占用）；cube 侧各口与 AIC / AIV 标量口分列",
+                w=15.2, h=0.30, size=12.0, color=sd.BODY_TEXT)
+        sd.text(s, 0.73, 1.52,
+                "MAC / MTE2 / MTE1 / fixpipe = cube 侧各口；scal_c / scal_v = AIC / AIV 标量口"
+                "（解码、循环、同步）；vec = AIV 向量；cube% = cube 利用率",
+                w=15.2, h=0.30, size=12.0, color=sd.BODY_TEXT)
+        sd.text(s, 0.73, 1.84, shape_desc, w=15.0, h=0.32, size=13.0, bold=True,
                 color=sd.TITLE_TEXT)
-        top, hdr_h, note_h = 2.26, 0.40, 0.50
+        top, hdr_h, note_h = 2.31, 0.40, 0.50
         row_h = min(0.72, (BOTTOM - top - hdr_h - note_h) / len(rows))
         hdr = ("case", "实现") + pf.COLS
         body = [(tag, impl) + tuple(f"{v:.1f}" for v in vals)
@@ -1462,15 +1482,15 @@ def draw_profiling_pages(prs):
 
     data_page("10.1. Profiling · BSND（0.26MB → 41.9MB，五档典型案例）",
               pf.BSND_SHAPE, pf.BSND_ROWS,
-              "极小档（0.26 / 0.33MB）ours 明显落后（实测 det 2.3×、nd 1.4–1.6×，见 10.3）：全部 pipe ≤0.5µs、"
+              "极小档（0.26 / 0.33MB）ours 明显落后（实测 det 2.3–2.4×、nd 1.4–1.7×，见 10.3）：全部 pipe ≤0.5µs、"
               "MAC 仅 0.1µs，而 duration 20–34µs ⇒ 差距全在固定开销（启动 + 轮次 / 同步结构）。"
-              "0.92MB 起 det 已占优（实测 1.05×）；中 / 大档 det 缺口集中在 MTE2 与 fixpipe"
+              "0.92MB 起 det 已占优（实测 1.09×）；中 / 大档 det 缺口集中在 MTE2 与 fixpipe"
               "（+26.6 / +8.9、+44.8 / +35.0），nd 各口 ≤ opst 而 duration 仍 1.35–1.49×")
     data_page("10.2. Profiling · TND causal（小 / 中 / 大典型案例）",
               pf.TND_SHAPE, pf.TND_ROWS,
               "与 BSND 同构：中 / 大档 nd 各口 ≤ opst、duration 1.45–1.51×；det 缺口 = MTE2 +62.5 / +54.3、"
               "fixpipe +80.9 / +64.1；MAC、scalar 均不高于 opst。小档（3.3MB）ours 占优："
-              "实测 nd 1.19×、det 1.27×（profiling 中 ours 的 fixpipe 也远低于 opst）")
+              "实测 nd 1.19×、det 1.29×（profiling 中 ours 的 fixpipe 也远低于 opst）")
 
     # ---- 10.3 结论与优化优先级 ----
     s = sd.blank_slide(prs)
@@ -1497,16 +1517,16 @@ def draw_profiling_pages(prs):
          "det 仅 +21.0/+14.0/+0.6；nd 实例化中 det 解码被 if constexpr 编译掉（lookahead 收益 ≈ 0）",
          "不是瓶颈", "③ 解码 / scalar 不做"),
         ("极小 shape\n（0.26–0.33MB）\n仍未占优",
-         "0.33MB：det 23.5 vs 10.1（2.3×）、nd 14.5 vs 10.2（1.4×）\n"
-         "0.26MB：det 19.1 vs 8.5（2.3×）、nd 13.9 vs 8.6（1.6×）\n"
+         "0.33MB：det 24.6 vs 10.4（2.4×）、nd 15.0 vs 10.4（1.4×）\n"
+         "0.26MB：det 20.2 vs 8.9（2.3×）、nd 14.6 vs 8.9（1.6×）\n"
          "profiling：全部 pipe ≤0.5µs、MAC 0.1µs，而 duration 22–34µs ⇒ 差距全在固定开销",
          "固定开销（启动 +\n轮次 / 同步结构）", "④ 固定开销专项\n（低优先级，暂不投入）"),
         ("≥0.9MB 已占优\n或持平",
-         "0.92MB：det 23.9 vs 25.0（1.05×）、nd 19.8 vs 19.1（0.96×）\n"
-         "TND 3.3MB：27.0/39.3 vs 33.2/45.7（1.19×/1.27×）",
+         "0.92MB：det 24.8 vs 26.9（1.09×）、nd 20.5 vs 20.4（1.00×）\n"
+         "TND 3.3MB：21.3/29.9 vs 25.4/38.7（1.19×/1.29×）",
          "规模够大后固定开销摊薄", "维持现状"),
     ]
-    sd.spec_table(s, 0.73, 2.06, ("观察", "证据（10.1 / 10.2 数据 + 实测 min-of-25）", "判断", "行动"),
+    sd.spec_table(s, 0.73, 2.06, ("观察", "证据（10.1 / 10.2 数据 + 实测 median of 25）", "判断", "行动"),
                   rows, col_w=(1.85, 7.30, 2.30, 3.25),
                   row_h=[0.44, 1.14, 1.10, 0.92, 1.00, 0.76], zebra=True,
                   size=11.5, header_size=12.5)
@@ -1519,7 +1539,7 @@ def draw_profiling_pages(prs):
         ("②", "BN2S2 det 驻留化：KV 组驻留 + L0C 累积（对齐目标主流水，参照合并前的 nd 路径）",
          "det MTE2 +54~+63、fixpipe +64~+81（中 / 大 TND）", "直接消 det 缺口"),
         ("③", "固定开销专项：极小 shape（≤0.35MB）的启动 / 轮次 / 同步裁剪",
-         "0.26–0.33MB det 2.3×、nd 1.4–1.6×；pipe 全空", "仅影响极小档，低优先级"),
+         "0.26–0.33MB det 2.3–2.4×、nd 1.4–1.7×；pipe 全空", "仅影响极小档，低优先级"),
         ("④", "解码 / scalar 专项",
          "nd scal_c 低于 opst；det 仅 +0.6~+21；lookahead 削减收益 ≈ 0", "不做"),
     ]
