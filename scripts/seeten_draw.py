@@ -463,8 +463,12 @@ def tensor_block(slide, x, y, label, color, cols=6, rows=2,
 
 
 def spec_table(slide, x, y, header, rows, col_w=(1.30, 1.26, 1.33, 5.09),
-               row_h=(0.80, 0.878, 0.556, 0.556, 0.556, 0.556), zebra=True):
-    """张量参数表：张量 | 形状 | 案例 shape | 说明。zebra 规则同 panel。"""
+               row_h=(0.80, 0.878, 0.556, 0.556, 0.556, 0.556), zebra=True,
+               size=13.0, header_size=15.5):
+    """张量参数表：张量 | 形状 | 案例 shape | 说明。zebra 规则同 panel。
+
+    size / header_size : 单元格 / 表头字号（默认沿用原张量表规格；紧凑表可调小）。
+    """
     tbl = _plain_table(slide, x, y, len(rows) + 1, len(header),
                        cell_w=col_w[0], cell_h=int(row_h[0] * 914400))
     for i, w in enumerate(col_w):
@@ -474,7 +478,7 @@ def spec_table(slide, x, y, header, rows, col_w=(1.30, 1.26, 1.33, 5.09),
     for c, head in enumerate(header):
         cell = tbl.cell(0, c)
         _cell_border(cell)
-        _write_cell(cell, head, size=15.5, bold=False,
+        _write_cell(cell, head, size=header_size, bold=False,
                     color=(STRONG_TEXT if c == 0 else TITLE_TEXT), cjk_font=CJK)
     for r, row in enumerate(rows, start=1):
         band = ZEBRA_FILL if (zebra and r % 2 == 1) else None
@@ -483,7 +487,7 @@ def spec_table(slide, x, y, header, rows, col_w=(1.30, 1.26, 1.33, 5.09),
             _cell_border(cell)
             if band:
                 _fill_cell(cell, band)
-            _write_cell(cell, val, size=15.5, bold=False, color=TITLE_TEXT)
+            _write_cell(cell, val, size=size, bold=False, color=TITLE_TEXT)
     return tbl
 
 

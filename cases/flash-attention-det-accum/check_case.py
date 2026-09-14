@@ -301,7 +301,7 @@ def main(pptx_path):
     else:
         ok("5b 页已标注选择器不可达")
 
-    # 性能对比页（10 页）：按 size 分页的 2 列统计表 + 明细表逐格 + 口径标注
+    # 性能对比页（10 页）：shape 在表格内，逐格核验（case 行 + GM/pass 行）
     import math as _m
 
     import perf_matrix as pm
@@ -315,87 +315,109 @@ def main(pptx_path):
     def _ratio(num, den):
         return [a / b if (a and b) else None for a, b in zip(num, den)]
 
-    def _gvals(vals, lay, sz):
-        return [vals[i] for i, (n, l, _) in enumerate(pm.CASES)
+    def _gidx(lay, sz):
+        return [i for i, (n, l, _) in enumerate(pm.CASES)
                 if l == lay and dc._size_class(n) == sz]
+
+    def _gvals(vals, lay, sz):
+        return [vals[i] for i in _gidx(lay, sz)]
 
     def _rate(vals, th=0.8):
         xs = [v for v in vals if v is not None]
         return sum(1 for v in xs if v >= th) / len(xs) if xs else 0.0
 
-    def _extreme(vals, mode):
-        xs = [v for v in vals if v is not None]
-        if not xs:
-            return float("nan")
-        return min(xs) if mode == "min" else max(xs)
+    def _gm_lay(vals, lay, sz):
+        return _gm([v for v in _gvals(vals, lay, sz) if v is not None])
 
-    checks_tables, perf_texts = [], []
+    def _mv(v, spec="{:.1f}"):
+        return "—" if v is None else spec.format(v)
+
+    checks_tables, perf_texts, slide_tables = [], [], []
     for sl in prs.slides:
+        tb = []
         for sh in sl.shapes:
             if sh.has_text_frame:
                 perf_texts.append(sh.text_frame.text)
             if getattr(sh, "has_table", False) and sh.has_table:
                 checks_tables.append(sh.table)
+                tb.append(sh.table)
                 perf_texts.extend(tc.text for row in sh.table.rows
                                   for tc in row.cells)
+        slide_tables.append(tb)
 
-    def find_table(header, labels):
-        for t in checks_tables:
-            if t.cell(0, 0).text.strip() != header:
+    # 性能页 9.1..9.9 是第 19..27 张（0-based 18..26）；同页两张表用行标签区分
+    def find_table(slide_i, labels):
+        for t in slide_tables[slide_i]:
+            if t.cell(0, 0).text.strip() != "#":
                 continue
             if ([t.cell(r, 0).text.strip() for r in range(1, len(t.rows))]
                     == labels):
                 return t
         return None
 
-    def check_page(header, rows, fmts, tag):
-        """2 列统计表（BSND / TND），按行口径由数据模块重算。"""
-        t = find_table(header, [r[0] for r in rows])
+    def check_case_table(slide_i, tag, lay, sz, cell_fn, footer_rows):
+        idx = _gidx(lay, sz)
+        labels = [f"#{j+1}" for j in idx] + [r[0] for r in footer_rows]
+        t = find_table(slide_i, labels)
         if t is None:
-            fail(f"性能页缺统计表: {header} / {[r[0] for r in rows]}")
+            fail(f"性能页缺 case 表: {tag} {lay} {sz} / {labels[:3]}...")
             return
-        fn_of = {"gm": _gm, "rate": _rate,
-                 "min": lambda v: _extreme(v, "min"),
-                 "max": lambda v: _extreme(v, "max")}
         bad = 0
-        for ri, (label, vals, mode) in enumerate(rows):
-            fn = fn_of[mode]
-            exp = [fmts[ri](fn(_gvals(vals, lay, sz)))
-                   for lay in ("BSND", "TND")]
-            got = [t.cell(ri + 1, ci + 1).text.strip() for ci in range(2)]
+        for ri, j in enumerate(idx):
+            exp = [pm.SHAPE[j]] + cell_fn(j)
+            got = [t.cell(ri + 1, c).text.strip()
+                   for c in range(1, len(exp) + 1)]
             if got != exp:
                 bad += 1
-                fail(f"性能统计表 {header}/{label}: {got} != {exp}")
+                fail(f"case 表 {tag} {lay} {sz} #{j+1}: {got} != {exp}")
+        for fi, row in enumerate(footer_rows):
+            got = [t.cell(len(idx) + 1 + fi, c).text.strip()
+                   for c in range(1, len(row))]
+            exp = list(row[1:])
+            if got != exp:
+                bad += 1
+                fail(f"case 表 {tag} {lay} {sz} {row[0]}: {got} != {exp}")
         if not bad:
-            ok(f"性能统计表 {header}: 与数据一致（{tag}）")
+            ok(f"性能 case 表 {tag} {lay} {sz}: {len(idx)} 行 + "
+               f"{len(footer_rows)} 汇总行一致")
 
     pen_ours = _ratio(pm.OURS_DET, pm.OURS_ND)
     pen_opst = _ratio(pm.OPST_DET, pm.OPST_ND)
     det_ratio = _ratio(pm.OPST_DET, pm.OURS_DET)
     nd_ratio = _ratio(pm.OPST_ND, pm.OURS_ND)
-    f2 = lambda v: f"{v:.2f}"
-    fp = lambda v: f"{v:.0%}"
     for i, sz in enumerate(SIZES):
         num = f"9.{i+1}"
-        check_page(f"det/nd 开销 (×) · {sz}",
-                   [("ours det/nd 几何平均", pen_ours, "gm"),
-                    ("opst det/nd 几何平均", pen_opst, "gm"),
-                    ("ours 最差组", pen_ours, "max")],
-                   [f2, f2, f2], num)
+        for lay in ("BSND", "TND"):
+            check_case_table(18 + i, num, lay, sz,
+                             lambda j: [_mv(pen_ours[j], "{:.2f}"),
+                                        _mv(pen_opst[j], "{:.2f}")],
+                             [("GM", "",
+                               f"{_gm_lay(pen_ours, lay, sz):.2f}",
+                               f"{_gm_lay(pen_opst, lay, sz):.2f}")])
     for i, sz in enumerate(SIZES):
         num = f"9.{i+4}"
-        check_page(f"det 对比 (×) · {sz}",
-                   [("opst/ours 几何平均", det_ratio, "gm"),
-                    ("达标 (≥0.8×)", det_ratio, "rate"),
-                    ("最差（组内 min）", det_ratio, "min")],
-                   [f2, fp, f2], num)
+        for lay in ("BSND", "TND"):
+            check_case_table(21 + i, num, lay, sz,
+                             lambda j: [_mv(pm.OURS_DET[j]),
+                                        _mv(pm.OPST_DET[j]),
+                                        _mv(det_ratio[j], "{:.2f}")],
+                             [("GM", "", f"{_gm_lay(pm.OURS_DET, lay, sz):.1f}",
+                               f"{_gm_lay(pm.OPST_DET, lay, sz):.1f}",
+                               f"{_gm_lay(det_ratio, lay, sz):.2f}"),
+                              ("pass", "", "", "",
+                               f"{_rate(_gvals(det_ratio, lay, sz), 0.8):.0%}")])
     for i, sz in enumerate(SIZES):
         num = f"9.{i+7}"
-        check_page(f"nd 对比 (×) · {sz}",
-                   [("opst/ours 几何平均", nd_ratio, "gm"),
-                    ("达标 (≥0.8×)", nd_ratio, "rate"),
-                    ("最差（组内 min）", nd_ratio, "min")],
-                   [f2, fp, f2], num)
+        for lay in ("BSND", "TND"):
+            check_case_table(24 + i, num, lay, sz,
+                             lambda j: [_mv(pm.OURS_ND[j]),
+                                        _mv(pm.OPST_ND[j]),
+                                        _mv(nd_ratio[j], "{:.2f}")],
+                             [("GM", "", f"{_gm_lay(pm.OURS_ND, lay, sz):.1f}",
+                               f"{_gm_lay(pm.OPST_ND, lay, sz):.1f}",
+                               f"{_gm_lay(nd_ratio, lay, sz):.2f}"),
+                              ("pass", "", "", "",
+                               f"{_rate(_gvals(nd_ratio, lay, sz), 0.8):.0%}")])
 
     # 9.10 明细：4 张表（BSND 11+10 / TND 8+7），逐格核验
     detail = [t for t in checks_tables

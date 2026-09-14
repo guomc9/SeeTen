@@ -33,7 +33,7 @@
 | `index_schedules.py` | 七种任务索引算法的 Python 实现 + 三条不变量校验 |
 | `draw_case.py` | 用 `scripts/seeten_draw.py` 画出案例页 |
 | `check_case.py` | 内容自检：矩阵回读对照算法、印刷公式回代、结论句核对 |
-| `out/v3-index-schedules.pptx` | 生成的页面（28 页：总览 + 轴遍历与 dS 分块 + 虚拟列专页 + 7 种方法 x 2 + 一页更难的 S2 ≠ S1 例子 + 十页性能对比：确定性开销 / det-vs-det / nd-vs-nd 各按 小/中/大 shape 分页（每页 BSND｜TND 两幅全宽图 + 统计表）+ 全矩阵明细） |
+| `out/v3-index-schedules.pptx` | 生成的页面（28 页：总览 + 轴遍历与 dS 分块 + 虚拟列专页 + 7 种方法 x 2 + 一页更难的 S2 ≠ S1 例子 + 十页性能对比：确定性开销 / det-vs-det / nd-vs-nd 各按 小/中/大 shape 分页（横轴 = case 序号 + 数据 size MB；每页 BSND｜TND 两幅全宽图 + 两张按 case 的 shape/核时表，含 GM/pass 汇总行）+ 全矩阵明细） |
 
 ```bash
 python index_schedules.py          # 先看七种算法的校验结果（应全为 0 冲突）
