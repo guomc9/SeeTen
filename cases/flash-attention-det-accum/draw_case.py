@@ -1281,17 +1281,20 @@ def draw_perf_detail_page(prs):
                 "（Task Duration min）· 空缺 = ops-transformer 无法运行",
                 w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
 
-        rows = [(f"#{i+1}", pm.SHAPE[i], f(od[i]), f(ond[i]), f(pd[i]),
-                 f(pnd[i]), r(det_ratio[i]), r(nd_ratio[i]))
-                for i in idxs]
+        rows = []
+        for i in idxs:
+            da, db = _best_pair(od[i], pd[i])
+            na, nb = _best_pair(ond[i], pnd[i])
+            rows.append((f"#{i+1}", pm.SHAPE[i], da, na, db, nb,
+                         r(det_ratio[i]), r(nd_ratio[i])))
         footers = []
         if lay == "TND":                     # 最后一页补 GM 与总体 pass
+            g_od, g_pd = _best_pair(gm([od[i] for i in idxs]),
+                                    gm([pd[i] for i in idxs]))
+            g_on, g_pn = _best_pair(gm([ond[i] for i in idxs]),
+                                    gm([pnd[i] for i in idxs]))
             footers = [
-                ("GM", "",
-                 f"{gm([od[i] for i in idxs]):.1f}",
-                 f"{gm([ond[i] for i in idxs]):.1f}",
-                 f"{gm([pd[i] for i in idxs]):.1f}",
-                 f"{gm([pnd[i] for i in idxs]):.1f}",
+                ("GM", "", g_od, g_on, g_pd, g_pn,
                  f"{gm([det_ratio[i] for i in idxs]):.2f}",
                  f"{gm([nd_ratio[i] for i in idxs]):.2f}"),
                 ("pass", "", "", "", "", "",
@@ -1306,11 +1309,23 @@ def draw_perf_detail_page(prs):
                       col_w=(0.52, 4.10, 1.66, 1.66, 1.66, 1.66, 1.66, 1.63),
                       row_h=[row_h] * n_rows, zebra=True,
                       size=size_c, header_size=size_c + 0.6)
-        sd.note(s, 0.73, min(1.72 + n_rows * row_h + 0.18, 11.34),
-                "数值 = msprof Task Duration 最小值（device 侧核时），非 event record；"
-                "空缺 = opst 无法运行（TND causal 要求 mask Skv=2048）。",
+        sd.note(s, 0.73, min(1.72 + n_rows * row_h + 0.30, 11.30),
+                "数值 = msprof Task Duration 最小值（device 侧），非 event record；"
+                "加粗 = det / nd 各自更优；空缺 = opst 无法运行（mask Skv=2048）。",
                 w=15.2, h=0.45)
     return s
+
+
+def _best_pair(a, b, fmt="{:.1f}"):
+    """对比表两值（ours, opst）中较小者用 **粗体** 标出；None 显示 —。"""
+    vals = [v for v in (a, b) if v is not None]
+    m = min(vals) if vals else None
+    def one(v):
+        if v is None:
+            return "—"
+        t = fmt.format(v)
+        return f"**{t}**" if (m is not None and v == m) else t
+    return one(a), one(b)
 
 
 def draw_perf_pages(prs):
@@ -1357,11 +1372,12 @@ def draw_perf_pages(prs):
     # ---- det-vs-det（9.4-9.6） ----
     for i, sz in enumerate(SIZES):
         def cell(ci, r=det_ratio, a=od, b=pd):
-            return [mv(a[ci]), mv(b[ci]), mv(r[ci], "{:.2f}")]
+            da, db = _best_pair(a[ci], b[ci])
+            return [da, db, mv(r[ci], "{:.2f}")]
 
         def footers(lay, sz=sz):
-            return [("GM", "", f"{gm_lay(od, lay, sz):.1f}",
-                     f"{gm_lay(pd, lay, sz):.1f}",
+            ga, gb = _best_pair(gm_lay(od, lay, sz), gm_lay(pd, lay, sz))
+            return [("GM", "", ga, gb,
                      f"{gm_lay(det_ratio, lay, sz):.2f}"),
                     ("pass", "", "", "",
                      f"{_rate(_group_vals(det_ratio, lay, sz), 0.8):.0%}")]
@@ -1369,7 +1385,7 @@ def draw_perf_pages(prs):
         draw_perf_page(
             prs, f"9.{i+4}", f"性能对比：det-vs-det（{sz} shape）",
             f"比值 = opst-det / 本仓库-det（≥ 0.8 = 达标）· {sz} shape 组 · "
-            "核时为 msprof kernel 时间（device 侧）",
+            "核时为 msprof kernel 时间（device 侧）· 表内加粗 = 更优的 det 核时",
             sz,
             [("opst-det / ours-det", det_ratio, sd.PERF_SELF)],
             "横轴 = case 序号 · 数据 size（MB，bf16：q/out/dout + k/v）· "
@@ -1383,11 +1399,12 @@ def draw_perf_pages(prs):
     # ---- nd-vs-nd（9.7-9.9） ----
     for i, sz in enumerate(SIZES):
         def cell(ci, r=nd_ratio, a=ond, b=pnd):
-            return [mv(a[ci]), mv(b[ci]), mv(r[ci], "{:.2f}")]
+            da, db = _best_pair(a[ci], b[ci])
+            return [da, db, mv(r[ci], "{:.2f}")]
 
         def footers(lay, sz=sz):
-            return [("GM", "", f"{gm_lay(ond, lay, sz):.1f}",
-                     f"{gm_lay(pnd, lay, sz):.1f}",
+            ga, gb = _best_pair(gm_lay(ond, lay, sz), gm_lay(pnd, lay, sz))
+            return [("GM", "", ga, gb,
                      f"{gm_lay(nd_ratio, lay, sz):.2f}"),
                     ("pass", "", "", "",
                      f"{_rate(_group_vals(nd_ratio, lay, sz), 0.8):.0%}")]
@@ -1395,7 +1412,7 @@ def draw_perf_pages(prs):
         draw_perf_page(
             prs, f"9.{i+7}", f"性能对比：nd-vs-nd（{sz} shape）",
             f"比值 = opst-nd / 本仓库-nd（≥ 0.8 = 达标）· {sz} shape 组 · "
-            "核时为 msprof kernel 时间（device 侧）",
+            "核时为 msprof kernel 时间（device 侧）· 表内加粗 = 更优的 nd 核时",
             sz,
             [("opst-nd / ours-nd", nd_ratio, sd.PERF_SELF)],
             "横轴 = case 序号 · 数据 size（MB，bf16：q/out/dout + k/v）· "

@@ -410,6 +410,8 @@ def text_on(fill: str) -> str:
 
 def _write_cell(cell, body: str, size=17.5, bold=True, color=ON_BLOCK,
                 font=LATIN, cjk_font=CJK, margin=None) -> None:
+    """格内文本。支持 `**加粗**` / `==强调==` 行内标记（标记不画出来），
+    用来在对比表里标出"更优的那一格"（见 `spec_table` 用法）。"""
     margin = MARGIN if margin is None else margin
     tf = cell.text_frame
     tf.word_wrap = False
@@ -422,11 +424,12 @@ def _write_cell(cell, body: str, size=17.5, bold=True, color=ON_BLOCK,
     for i, ln in enumerate(lines):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.alignment = PP_ALIGN.CENTER
-        for seg, is_cjk in _split_scripts(ln):
-            run = p.add_run()
-            run.text = seg
-            _style_run(run, size=size, bold=bold, color=color,
-                       font=(cjk_font if is_cjk else font), cjk_font=cjk_font)
+        for seg, seg_bold, seg_color in _rich_segments(ln, bold, color):
+            for piece, is_cjk in _split_scripts(seg):
+                run = p.add_run()
+                run.text = piece
+                _style_run(run, size=size, bold=seg_bold, color=seg_color,
+                           font=(cjk_font if is_cjk else font), cjk_font=cjk_font)
 
 
 # ---------------------------------------------------------------- 六种表式
