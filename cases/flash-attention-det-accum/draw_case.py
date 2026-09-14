@@ -35,21 +35,21 @@ META = {
     ix.KIND_DENSE_SWIZZLE: dict(
         en="Dense Swizzle", cn="列私有 swizzle", low=lambda s, kw: "S2 列",
         tags=lambda s, kw: [("layout", "TND" if "cu_q" in kw else "BSND"),
-                            ("causal", "否"), ("", "MHA"),
-                            ("dk/dV", "列私有")],
+                            ("", "非 causal"), ("", "MHA"),
+                            ("dk/dv", "列私有")],
         why=["低位是 S2 列 → 同一轮里相邻的核落在**相邻两列**上；",
              "task id 在 m 轮内不变 → 一条核**守死一条列**，列内把 S1 走一遍。",
              "同一个 S2 出现在多条核上，是 **不同 batch / 不同轮**。"]),
     ix.KIND_DENSE_INDEX: dict(
         en="Dense Index", cn="先分批再分列", low=lambda s, kw: "B 批次",
-        tags=lambda s, kw: [("layout", "BSND"), ("causal", "否"),
-                            ("", "MHA"), ("dk/dV", "列私有"),
+        tags=lambda s, kw: [("layout", "BSND"), ("", "非 causal"),
+                            ("", "MHA"), ("dk/dv", "列私有"),
                             ("核数", "> S1 块数")],
         why=["低位换成 batch → 同一轮各核**分属不同 batch**，S1 撞不到一起；",
              "所以**核数可以超过 S1 块数**，代价是列私有要靠切片保证。"]),
     ix.KIND_CAUSAL_SWIZZLE: dict(
         en="Causal Swizzle", cn="因果折叠", low=lambda s, kw: "S2（fold 后）",
-        tags=lambda s, kw: [("layout", "BSND"), ("causal", "是，方形"),
+        tags=lambda s, kw: [("layout", "BSND"), ("", "causal（方形）"),
                             ("", "MHA"), ("buffer", "2 个 (parity)"),
                             ("可达性", "↪ 仅 Left-Up 内部委托")],
         why=["fold 把两个相邻 batch 的三角拼成一个 **m x (n+1) 的满矩形**，task id 在矩形里照排；",
@@ -59,7 +59,7 @@ META = {
         en="Left-Up Causal", cn="左上对齐",
         low=lambda s, kw: "S2 列（同方形折叠）" if s.M() <= s.N() else "S2（虚拟）",
         tags=lambda s, kw: [("layout", "BSND"),
-                            ("causal", "是，S1 = S2" if s.M() <= s.N() else "是，S1 > S2"),
+                            ("", "causal（S1 = S2）" if s.M() <= s.N() else "causal（S1 > S2）"),
                             ("", "MHA"),
                             ("S1 = S2 时", "委托方形折叠" if s.M() <= s.N() else "用左上几何"),
                             ("buffer", "2 个 (parity)"),
@@ -72,20 +72,20 @@ META = {
              "整个虚拟矩形都派活 —— 零 idle，也不用打 mask（该分支生产选择器不会选，见 5b 页）。"])),
     ix.KIND_GQA_DENSE: dict(
         en="GQA Dense", cn="任务切片", low=lambda s, kw: "S2（切片）",
-        tags=lambda s, kw: [("layout", "BSND"), ("causal", "跟随 epilogue mask"),
-                            ("", "GQA"), ("dk/dV", "共享 workspace")],
+        tags=lambda s, kw: [("layout", "BSND"), ("", "causal（epilogue mask）"),
+                            ("", "GQA"), ("dk/dv", "共享 workspace")],
         why=["一个 KV head 对应 g 个 Q head → 同一 KV 列的 g 份贡献**不保证同核**；",
              "（R 与 g 非整除或 gcd 修正时会分裂）→ 切片分核 + 共享 workspace 的轮序 atomic add。"]),
     ix.KIND_TND_DENSE: dict(
         en="TND Dense Swizzle", cn="逐批列私有", low=lambda s, kw: "本批 S2 列",
-        tags=lambda s, kw: [("layout", "TND (变长)"), ("causal", "否"),
-                            ("", "MHA"), ("dk/dV", "列私有")],
+        tags=lambda s, kw: [("layout", "TND (变长)"), ("", "非 causal"),
+                            ("", "MHA"), ("dk/dv", "列私有")],
         why=["每个 batch 有自己的 round 前缀，**批内仍按列私有**排；",
              "核数超过本批列数时那一条核空转 —— 变长 batch 的代价。"]),
     ix.KIND_TND_GQA_DENSE: dict(
         en="TND GQA Dense", cn="按面积展平", low=lambda s, kw: "展平索引",
-        tags=lambda s, kw: [("layout", "TND (变长)"), ("causal", "跟随 epilogue mask"),
-                            ("", "GQA"), ("dk/dV", "共享 workspace")],
+        tags=lambda s, kw: [("layout", "TND (变长)"), ("", "causal（epilogue mask）"),
+                            ("", "GQA"), ("dk/dv", "共享 workspace")],
         why=["按面积前缀把任务空间**展平后等分成 k 段**，每条核顺序扫自己那段；",
              "不追求列私有，只保证**同轮各核的 (B,N2,G,S1) 互不相同**。"]),
 }
@@ -633,7 +633,7 @@ def draw_overview(prs):
         m = META[kind]
         rows.append((f"{i}. {m['en']}",
                      "TND" if "cu_q" in kw else "BSND",
-                     "是" if causal else "否",
+                     "causal" if causal else "非 causal",
                      "GQA" if shape.groupNum > 1 else "MHA",
                      "是" if shape.groupNum == 1 else "否",
                      str(mr),
@@ -641,12 +641,12 @@ def draw_overview(prs):
     sd.spec_table(s, 0.73, 1.72,
                   ("规则", "layout", "causal", "MHA/GQA", "列私有", "总轮数", "低位先走哪个轴"),
                   rows,
-                  col_w=(2.75, 1.10, 0.95, 0.95, 0.95, 0.95, 2.10),
+                  col_w=(2.55, 1.10, 1.15, 0.95, 0.95, 0.95, 2.10),
                   row_h=(0.58,) + (0.62,) * 7)
     sd.note(s, 0.73, 7.00,
             "所有规则都是纯算术：(round, core) 一确定，结果就唯一 —— 这就是确定性的来源。",
             w=15.2, h=0.36)
-    sd.text(s, 0.73, 7.40, "causal 列 = 本页例子是否 causal；GQA / TND-GQA 的 causal 由 epilogue mask 处理。",
+    sd.text(s, 0.73, 7.40, "表中「causal」= 本页例子的形状；GQA / TND-GQA 的 causal 由 epilogue mask 处理。",
             w=9.90, h=0.28, size=13, color=sd.BODY_TEXT)
     sd.text(s, 0.73, 7.72, "怎么读后面的例子", w=13.0, h=0.34, size=18, bold=True)
     for i, line in enumerate([

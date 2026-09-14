@@ -638,7 +638,9 @@ def tag_row(slide, x, y, tags, size=13.0, pad=0.16, gap=0.14, h=0.34,
     cur = x
     for label, value in tags:
         body = f"{label} {value}" if label else str(value)
-        w = est_text_width(body, size) + pad * 2
+        # 估宽之外再留 0.10 in 安全边距：芯片内边距吃掉两头后仍不贴边，
+        # 否则部分渲染器会把 "MHA" 这种短词也挤成换行
+        w = est_text_width(body, size) + pad * 2 + 0.10
         box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(cur),
                                      Inches(y), Inches(w), Inches(h))
         box.adjustments[0] = 0.25
