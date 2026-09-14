@@ -1115,72 +1115,92 @@ PERF_COLORS = {"v4-det": sd.PERF_SELF, "v4-nd": sd.PERF_SELF_ALT,
                "opst-det": sd.PERF_REF, "opst-nd": sd.PERF_REF_ALT}
 
 
-def draw_perf_page(prs):
-    """性能对比页（可选）：det-vs-det（跨仓库）与 det-vs-nd（各自仓库的确定性开销）。
+def draw_perf_page(prs, num, title, sub, panels, fig_note, table_header,
+                   table_rows, table_fmts, highlight=(), read_rows=(),
+                   key="", fig_h=4.90):
+    """一张性能对比页：大图（横轴拉长、全部 shape） + 数据表 + 读法 + 结论。
 
-    数据：PERF_TIMES（msprof kernel 时间中位数，μs）。
+    数据来源：PERF_TIMES（msprof kernel 时间中位数 μs，causal BSND H8 D128）。
     """
-    T = PERF_TIMES
-    rep = ["b1_s4096", "b1_s8192", "b4_s4096", "b4_s8192"]
-    idx = [PERF_SHAPES.index(n) for n in rep]
-
-    def ratio(a, b):
-        return [T[a][i] / T[b][i] for i in idx]
-
     s = sd.blank_slide(prs)
-    sd.title(s, "9. 性能对比：确定性 BN2S2 vs 基线 vs opst", y=0.62)
-    sd.text(s, 0.73, 1.22,
-            "本仓库：v4-det / v4-nd（基线）；参考仓库：opst-det / opst-nd · "
-            "causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧），非 event record",
-            w=15.2, h=0.30, size=14.5, color=sd.BODY_TEXT)
+    sd.title(s, f"{num}. {title}", y=0.62)
+    sd.text(s, 0.73, 1.22, sub, w=15.2, h=0.30, size=14.0, color=sd.BODY_TEXT)
+    sd.perf_figure(s, 0.73, 1.68, 15.2, fig_h, panels, note=fig_note)
+    ty = 1.68 + fig_h + (0.40 if fig_note else 0.10) + 0.22
+    sd.perf_table(s, 0.73, ty, PERF_SHAPES, table_rows, header=table_header,
+                  first_col_w=1.75, col_w=1.05, size=12.5, row_h=0.42,
+                  fmts=table_fmts, highlight=highlight)
+    if read_rows:
+        sd.panel(s, 11.15, ty, "怎么读", ("看什么", "结论"), read_rows,
+                 col_w=(1.25, 3.45), row_h=0.56, size=11.5)
+    sd.note(s, 0.73, 11.22, key, w=15.2, h=0.52)
+    return s
 
-    # 上：matplotlib 渲染的两张对比图（贴图，比原生柱状图精细）
-    panels = [
-        dict(title="Deterministic penalty (det / nd kernel time, > 1 = det slower)",
-             groups=rep,
-             series=[("ours (v4)", ratio("v4-det", "v4-nd"), sd.PERF_SELF),
-                     ("opst", ratio("opst-det", "opst-nd"), sd.PERF_REF)],
-             ylabel="ratio", best=0, value_fmt="{:.2f}"),
-        dict(title="Kernel-time ratio (opst-det / ours-det, > 1 = ours faster)",
-             groups=rep,
-             series=[("ours v4-det", ratio("opst-det", "v4-det"), sd.PERF_SELF)],
-             ylabel="ratio", best=0, ref=1.0, split=1.0, value_fmt="{:.2f}"),
-    ]
-    sd.perf_figure(s, 0.73, 1.68, 15.2, 3.85, panels,
-                   note="核时取自 msprof Task Duration 中位数；倍率由核时相除得到"
-                        "（profiling 口径，非 event record；图内文字用英文以避开字体缺字）")
 
-    # 下：核时 + 三种对比比值的表（字体放大到 12.5）
+def draw_perf_pages(prs):
+    """把性能对比拆成多页：确定性开销 / det 对比 / nd 对比（横轴 = 全部 8 个 shape）。"""
+    T = PERF_TIMES
+
     def div(a, b):
         return [x / y for x, y in zip(T[a], T[b])]
 
-    series = [
-        ("本仓库 det 核时 (μs)", T["v4-det"]),
-        ("本仓库 nd 核时 (μs)", T["v4-nd"]),
-        ("opst det 核时 (μs)", T["opst-det"]),
-        ("opst nd 核时 (μs)", T["opst-nd"]),
-        ("本仓库 det/nd 开销 (×)", div("v4-det", "v4-nd")),
-        ("opst det/nd 开销 (×)", div("opst-det", "opst-nd")),
-        ("det 对比 opst/本仓库 (×)", div("opst-det", "v4-det")),
-    ]
-    sd.perf_table(s, 0.73, 6.15, PERF_SHAPES, series, header="核时 (μs)",
-                  first_col_w=2.10, col_w=1.02, size=12.5, row_h=0.40,
-                  fmts=["{:.1f}"] * 4 + ["{:.2f}"] * 3,
-                  best_groups=[[0, 2], [1, 3]],      # det 组 / nd 组 各自标最优
-                  highlight=(0, 1), note="")
-    # 右栏：三个对比怎么读
-    sd.panel(s, 11.30, 6.15, "三个对比怎么读", ("对比", "结论"), [
-        ("det vs det", "opst-det / 本仓库-det：大 shape **>1**\n（本仓库更快），小 shape <1"),
-        ("本仓库确定性开销", "det / nd：**1.05–1.22×**，\n大 shape 开销更小"),
-        ("opst 确定性开销", "det / nd：1.11–1.98×，\n比本仓库高不少"),
-    ], col_w=(1.50, 3.20), row_h=0.62, size=11.5)
-    sd.note(s, 0.73, 11.15,
-            "结论：确定性 BN2S2 的开销随 shape 增大而收敛（大 shape 核时反超 opst、"
-            "确定性损失也更小）；小 shape 仍是 opst 更快；表格加粗 = det / nd 两组"
-            "各自列内最优。",
-            w=15.2, h=0.52)
-    return s
+    det_cost_ours = div("v4-det", "v4-nd")
+    det_cost_opst = div("opst-det", "opst-nd")
+    det_ratio = div("opst-det", "v4-det")
+    nd_ratio = div("opst-nd", "v4-nd")
 
+    draw_perf_page(
+        prs, "9.1", "性能对比：确定性开销（det / nd 核时倍率）",
+        "本仓库：v4-det / v4-nd（基线）；参考仓库：opst-det / opst-nd · "
+        "causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧），非 event record",
+        [dict(title="Deterministic penalty (det / nd kernel time, > 1 = det slower)",
+              groups=PERF_SHAPES,
+              series=[("ours (v4)", det_cost_ours, sd.PERF_SELF),
+                      ("opst", det_cost_opst, sd.PERF_REF)],
+              ylabel="ratio", best=0, value_fmt="{:.2f}")],
+        "核时取自 msprof Task Duration 中位数；倍率 = det 核时 / nd 核时（profiling 口径，非 event record）",
+        "det/nd 开销 (×)",
+        [("本仓库", det_cost_ours), ("opst", det_cost_opst)],
+        ["{:.2f}"] * 2, highlight=(0,),
+        read_rows=[("> 1", "确定性更慢（劣化）"),
+                   ("本仓库", "1.05–1.22×，**随 shape 增大收敛**"),
+                   ("opst", "1.11–1.98×，大 shape 劣化近 2×")],
+        key="结论：本仓库的确定性开销明显更小（1.05–1.22×），且随 shape 增大而收敛；"
+            "opst 的确定性劣化在大 shape 上接近 2×。")
+
+    draw_perf_page(
+        prs, "9.2", "性能对比：det-vs-det（opst-det / 本仓库-det）",
+        "同口径确定性实现对比 · causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧）",
+        [dict(title="Kernel-time ratio (opst-det / ours-det, > 1 = ours faster)",
+              groups=PERF_SHAPES,
+              series=[("opst / ours det cost", det_ratio, sd.PERF_SELF)],
+              ylabel="ratio", best=0, ref=1.0, split=1.0, value_fmt="{:.2f}")],
+        "核时取自 msprof Task Duration 中位数；比值 = opst-det / 本仓库-det；<1 的柱标灰 = 本仓库更慢",
+        "核时 (μs)",
+        [("本仓库 det", T["v4-det"]), ("opst det", T["opst-det"])],
+        ["{:.1f}"] * 2, highlight=(0,),
+        read_rows=[("> 1", "本仓库更快（蓝柱）"),
+                   ("< 1", "本仓库更慢（灰柱）"),
+                   ("现状", "小 shape 慢 1.35–1.55×；\n大 shape 快 3–18%")],
+        key="结论：小/中 shape 仍是 opst 的确定性实现更快；b4/b8_s4096、b4_s8192 "
+            "三个大 shape 上本仓库反超（最多 18%）。")
+
+    draw_perf_page(
+        prs, "9.3", "性能对比：nd-vs-nd（opst-nd / 本仓库-nd）",
+        "非确定性路径对比（基线口径）· causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧）",
+        [dict(title="Kernel-time ratio (opst-nd / ours-nd, > 1 = ours faster)",
+              groups=PERF_SHAPES,
+              series=[("opst / ours nd cost", nd_ratio, sd.PERF_SELF)],
+              ylabel="ratio", best=0, ref=1.0, split=1.0, value_fmt="{:.2f}")],
+        "核时取自 msprof Task Duration 中位数；比值 = opst-nd / 本仓库-nd；<1 的柱标灰 = 本仓库更慢",
+        "核时 (μs)",
+        [("本仓库 nd", T["v4-nd"]), ("opst nd", T["opst-nd"])],
+        ["{:.1f}"] * 2, highlight=(0,),
+        read_rows=[("< 1 全部", "本仓库 nd 全面慢于 opst"),
+                   ("差距", "1.19–1.47×（既有问题）"),
+                   ("说明", "非确定路径差距与本重构无关")],
+        key="结论：非确定路径上本仓库整体慢 opst 1.19–1.47× —— 这是分支既有的基础流水线差距，"
+            "与本次确定性重构无关。")
 
 def main(path):
     prs = sd.new_deck("4:3")
@@ -1193,7 +1213,7 @@ def main(path):
         draw_example_page(prs, i, name, kind, shape, mr, kw, causal)
         if kind == ix.KIND_LEFT_UP_CAUSAL:      # 再加一页更大的非方形例子
             draw_leftup_big_page(prs, i)
-    draw_perf_page(prs)                         # 可选：有 profiling 数据才画
+    draw_perf_pages(prs)                        # 可选：有 profiling 数据才画（多页）
     sd.save(prs, path)
     errors, warns = sd.check_layout(prs)
     cells = sd.check_cells(prs)

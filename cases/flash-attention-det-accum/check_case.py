@@ -301,49 +301,52 @@ def main(pptx_path):
     else:
         ok("5b 页已标注选择器不可达")
 
-    # 性能对比页：核时表逐格对照 + 口径标注
-    perf_tbl, perf_texts = None, []
+    # 性能对比页（拆成 3 页）：逐表对照 + 口径标注
+    checks_tables, perf_texts = [], []
     for sl in prs.slides:
         for sh in sl.shapes:
             if sh.has_text_frame:
                 perf_texts.append(sh.text_frame.text)
             if getattr(sh, "has_table", False) and sh.has_table:
+                checks_tables.append(sh.table)
                 perf_texts.extend(tc.text for row in sh.table.rows
                                   for tc in row.cells)
-                if sh.table.cell(0, 0).text.strip() == "核时 (μs)":
-                    perf_tbl = sh.table
-    if perf_tbl is None:
-        fail("性能页: 找不到『核时 (μs)』表")
-    else:
-        T = dc.PERF_TIMES
-        exp = [("本仓库 det 核时 (μs)", [f"{v:.1f}" for v in T["v4-det"]]),
-               ("本仓库 nd 核时 (μs)", [f"{v:.1f}" for v in T["v4-nd"]]),
-               ("opst det 核时 (μs)", [f"{v:.1f}" for v in T["opst-det"]]),
-               ("opst nd 核时 (μs)", [f"{v:.1f}" for v in T["opst-nd"]])]
-        for a, b in (("v4-det", "v4-nd"), ("opst-det", "opst-nd"),
-                     ("opst-det", "v4-det")):
-            exp.append((f"ratio {a}/{b}",
-                        [f"{x / y:.2f}" for x, y in zip(T[a], T[b])]))
-        got = {perf_tbl.cell(r, 0).text.strip():
-               [perf_tbl.cell(r, c).text.strip()
-                for c in range(1, len(perf_tbl.columns))]
-               for r in range(1, len(perf_tbl.rows))}
-        labels = ["本仓库 det 核时 (μs)", "本仓库 nd 核时 (μs)",
-                  "opst det 核时 (μs)", "opst nd 核时 (μs)",
-                  "本仓库 det/nd 开销 (×)", "opst det/nd 开销 (×)",
-                  "det 对比 opst/本仓库 (×)"]
-        bad = 0
-        for (_, vals), label in zip(exp, labels):
-            row = got.get(label)
-            if row is None or row != vals:
-                bad += 1
+    T = dc.PERF_TIMES
+
+    def find_table(header, labels):
+        for t in checks_tables:
+            if t.cell(0, 0).text.strip() != header:
+                continue
+            if ([t.cell(r, 0).text.strip() for r in range(1, len(t.rows))]
+                    == labels):
+                return t
+        return None
+
+    def fmt(values, spec):
+        return [spec.format(v) for v in values]
+
+    for header, labels, exp_rows in [
+            ("det/nd 开销 (×)", ["本仓库", "opst"],
+             [fmt([a / b for a, b in zip(T["v4-det"], T["v4-nd"])], "{:.2f}"),
+              fmt([a / b for a, b in zip(T["opst-det"], T["opst-nd"])], "{:.2f}")]),
+            ("核时 (μs)", ["本仓库 det", "opst det"],
+             [fmt(T["v4-det"], "{:.1f}"), fmt(T["opst-det"], "{:.1f}")]),
+            ("核时 (μs)", ["本仓库 nd", "opst nd"],
+             [fmt(T["v4-nd"], "{:.1f}"), fmt(T["opst-nd"], "{:.1f}")])]:
+        t = find_table(header, labels)
+        if t is None:
+            fail(f"性能页缺表: {header} / {labels}")
+            continue
+        bad = sum(1 for ri, exp in enumerate(exp_rows)
+                  if [t.cell(ri + 1, ci + 1).text.strip()
+                      for ci in range(len(dc.PERF_SHAPES))] != exp)
         if bad:
-            fail(f"性能页核时表: {bad} 行与数据不符")
+            fail(f"性能页表 {header}{labels}: {bad} 行与数据不符")
         else:
-            ok(f"性能页核时表: 7 行 × {len(dc.PERF_SHAPES)} 列与数据一致")
+            ok(f"性能页表 {header}{labels}: 与数据一致")
     blob = " ".join(perf_texts)
-    for token in ("非 event record", "msprof", "Task Duration",
-                  "det/nd", "opst/本仓库"):
+    for token in ("非 event record", "msprof", "Task Duration", "det/nd",
+                  "opst-det / 本仓库-det", "opst-nd / 本仓库-nd"):
         if token in blob:
             ok(f"性能页标注含「{token}」")
         else:

@@ -28,7 +28,7 @@ construction.
 | Rule-selection table | Dense Swizzle vs Dense Index compared by which axis the low task-id digit walks, and when to pick each |
 | Fill whitespace with real tables | Comparison table (which rule applies to this shape), cost numbers, per-core column list; placed by priority into whichever column has room |
 | Ownership labels hug their table | `B=1`, `N2=1`, `G=1` span only their own grid and sit right on top of it |
-| Performance comparison page (optional) | Kernel-time table (msprof, not event record) split into det-vs-det (ours vs opst) and determinism cost (det/nd per repo), plus two matplotlib figures rendered with the DeepSeek palette |
+| Performance comparison pages (optional) | Three pages — determinism penalty (det/nd), det-vs-det, nd-vs-nd — each with a wide matplotlib figure (all 8 shapes) in the DeepSeek palette, a matching kernel-time (msprof, not event record) table and reading notes |
 
 ## Files
 
@@ -37,7 +37,7 @@ construction.
 | `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
 | `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
 | `check_case.py` | Content self-check: matrix readback vs algorithms, printed-formula replay, claim cross-checks |
-| `out/v4-index-schedules.pptx` | The generated pages (19: overview + axis walkthrough + virtual-column page + 7 methods x 2 + a harder non-square causal example + a performance comparison page) |
+| `out/v4-index-schedules.pptx` | The generated pages (21: overview + axis walkthrough + virtual-column page + 7 methods x 2 + a harder non-square causal example + three performance comparison pages) |
 
 ```bash
 python index_schedules.py          # check the seven algorithms first (expect zero conflicts)
