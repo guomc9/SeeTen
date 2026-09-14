@@ -1407,6 +1407,77 @@ def draw_perf_pages(prs):
     draw_perf_detail_page(prs)
 
 
+def draw_after_perf(prs):
+    """性能段之后的补充页（10.x profiling）。"""
+    draw_profiling_pages(prs)
+
+
+def draw_profiling_pages(prs):
+    """10.1 分 pipe profiling 数据 + 10.2 瓶颈结论与优化优先级。"""
+    import profile_data as pf
+
+    cols = ("dur", "MAC", "MTE2", "fixpipe", "scal_c", "vec", "scal_v", "cube%")
+
+    # ---- 10.1 数据页 ----
+    s = sd.blank_slide(prs)
+    sd.title(s, "10.1. Profiling：分 pipe 用时（msprof PipeUtilization）", y=0.62)
+    sd.text(s, 0.73, 1.22,
+            "device 侧用时 µs；dur = Task Duration；MAC/MTE2/fixpipe = cube 三件套；"
+            "scal_c / scal_v = AIC / AIV 标量口（解码、循环、同步）；cube% = cube 利用率 · "
+            "warmup 5 + repeat 10 · 非 event record",
+            w=15.2, h=0.34, size=12.0, color=sd.BODY_TEXT)
+    sd.text(s, 0.73, 1.70, f"A · {pf.TND_SHAPE}（det 与 nd 同 shape）",
+            w=14.0, h=0.28, size=13.5, bold=True, color=sd.TITLE_TEXT)
+    rows = [(lab,) + tuple(f"{v:.1f}" for v in vals) for lab, vals in pf.TND_ROWS]
+    sd.spec_table(s, 0.73, 2.18, ("实现",) + cols, rows,
+                  col_w=(1.75,) + (1.60,) * 8, row_h=[0.36] * 5, zebra=True,
+                  size=11.5, header_size=12.0)
+    ty = 2.18 + 5 * 0.36 + 0.30
+    sd.text(s, 0.73, ty, f"B · {pf.BSND_SHAPE}",
+            w=14.6, h=0.28, size=13.5, bold=True, color=sd.TITLE_TEXT)
+    rows = [(tag, impl) + tuple(f"{v:.1f}" for v in vals)
+            for tag, impl, vals in pf.BSND_ROWS]
+    sd.spec_table(s, 0.73, ty + 0.42, ("case", "实现") + cols, rows,
+                  col_w=(0.62, 1.55) + (1.45,) * 8, row_h=[0.335] * 13,
+                  zebra=True, size=10.5, header_size=11.0)
+
+    # ---- 10.2 结论页 ----
+    s = sd.blank_slide(prs)
+    sd.title(s, "10.2. Profiling 结论：瓶颈在哪、先优化什么", y=0.62)
+    sd.text(s, 0.73, 1.22,
+            "读法：先看 dur（总时长）再看哪条 pipe 最高；比较同一 shape 的 det / nd "
+            "与两仓库实现 —— 若我们每条 pipe 都不高于对方、时长却更长，问题在重叠/等待",
+            w=15.2, h=0.34, size=12.0, color=sd.BODY_TEXT)
+    rows = [
+        ("nd 主流水是瓶颈",
+         "中/大 shape：ours nd 91 / 263µs vs opst 67 / 177µs（1.35–1.49×），但**我们每条 pipe 都不更高**\n"
+         "（MTE2 28 vs 15、59 vs 59；fixpipe 34 vs 46、88 vs 146；scalar 21 vs 30、67 vs 78）；"
+         "cube% 93 / 95 仍有余量\n"
+         "→ **重叠/串联受限**，非吞吐受限；小 shape 全部 pipe ≤10µs、时长 25–33µs"
+         "（固定开销主导，我们已持平/更快）"),
+        ("det 的增量在加载与写回",
+         "BSND 中 MTE2 +27µs（45.6 vs 19.0）；大 MTE2 +45（135 vs 90）+ fixpipe +35（180 vs 145）；"
+         "TND causal MTE2 +63、fixpipe +81\n"
+         "MAC 均不高于 opst → 重复加载 Q/Kᵀ/K/dY 与 fp32 原子累加 + 每列 cast 是 det 主要成本\n"
+         "（nd 的 KV 驻留 + L0C 累积未用于 det）"),
+        ("scalar / 解码不是瓶颈",
+         "nd scalar 全面低于 opst（21 vs 30、67 vs 78、78 vs 94）；det scalar 仅 +0.6 / +14 / +21µs\n"
+         "nd 实例化里 det 解码被 if constexpr 编译掉；削减 lookahead 的实测收益 ≈ 0 → 不再投入"),
+        ("优化优先级",
+         "① 主流水重叠（round/barrier、每任务串联、双缓冲）—— nd/det 同时受益\n"
+         "② 把 KV 驻留 + L0C 累积引入 BN2S2 det；③ 解码/scalar 不做"),
+    ]
+    sd.spec_table(s, 0.73, 1.72, ("观察", "证据与结论（数字见 10.1）"),
+                  rows, col_w=(2.60, 12.10),
+                  row_h=[0.42, 0.95, 0.95, 0.70, 0.70], zebra=True,
+                  size=11.5, header_size=12.5)
+    sd.note(s, 0.73, 6.62,
+            "数据留档：.docs/scratch/tnd_causal_ab.md（同表）；结论与 TND / BSND 两套 "
+            "profiling 互为佐证。",
+            w=15.2, h=0.30, size=11.0)
+    return s
+
+
 def main(path):
     prs = sd.new_deck("4:3")
     draw_overview(prs)
@@ -1419,6 +1490,7 @@ def main(path):
         if kind == ix.KIND_LEFT_UP_CAUSAL:      # 再加一页更大的非方形例子
             draw_leftup_big_page(prs, i)
     draw_perf_pages(prs)                        # 可选：有 profiling 数据才画（多页）
+    draw_after_perf(prs)                        # 10.x：分 pipe profiling + 结论
     sd.save(prs, path)
     errors, warns = sd.check_layout(prs)
     cells = sd.check_cells(prs)

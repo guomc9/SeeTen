@@ -470,6 +470,52 @@ def main(pptx_path):
         if not bad:
             ok("性能明细表: BSND/TND 逐格一致 + TND GM/pass 行一致")
 
+    # 10.1/10.2 profiling 页：分 pipe 表逐格 + 结论表存在性
+    import profile_data as pf
+
+    def find_by_header(header):
+        for t in checks_tables:
+            if [t.cell(0, c).text.strip() for c in range(len(t.columns))] == \
+                    list(header):
+                return t
+        return None
+
+    prof_cols = ("实现", "dur", "MAC", "MTE2", "fixpipe", "scal_c", "vec",
+                 "scal_v", "cube%")
+    t = find_by_header(prof_cols)
+    if t is None:
+        fail("缺 10.1 TND profiling 表")
+    else:
+        bad = 0
+        for ri, (lab, vals) in enumerate(pf.TND_ROWS):
+            exp = [lab] + [f"{v:.1f}" for v in vals]
+            got = [t.cell(ri + 1, c).text.strip() for c in range(9)]
+            if got != exp:
+                bad += 1
+                fail(f"10.1 TND {lab}: {got} != {exp}")
+        if not bad:
+            ok("10.1 TND profiling 表: 逐格一致")
+
+    t = find_by_header(("case", "实现") + prof_cols[1:])
+    if t is None:
+        fail("缺 10.1 BSND profiling 表")
+    else:
+        bad = 0
+        for ri, (tag, impl, vals) in enumerate(pf.BSND_ROWS):
+            exp = [tag, impl] + [f"{v:.1f}" for v in vals]
+            got = [t.cell(ri + 1, c).text.strip() for c in range(10)]
+            if got != exp:
+                bad += 1
+                fail(f"10.1 BSND {tag}/{impl}: {got} != {exp}")
+        if not bad:
+            ok("10.1 BSND profiling 表: 逐格一致")
+
+    t = find_by_header(("观察", "证据与结论（数字见 10.1）"))
+    if t is None:
+        fail("缺 10.2 结论表")
+    else:
+        ok(f"10.2 结论表: {len(t.rows) - 1} 条（含优化优先级）")
+
     blob = " ".join(perf_texts)
     for token in ("非 event record", "msprof", "Task Duration", "det/nd",
                   "opst-det / 本仓库-det", "opst-nd / 本仓库-nd"):
