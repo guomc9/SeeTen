@@ -166,10 +166,15 @@ def est_text_width(body: str, size_pt: float, mono: bool = False) -> float:
             em += 0.28
         elif ch.isdigit():
             em += 0.50
+        elif ch in "MW":
+            em += 0.92                     # TNR 最宽的大写
         elif ch.isupper():
-            em += 0.62
+            em += 0.70                     # TNR 大写均值（原 0.62 明显低估，
+                                           # 导致 MHA/GQA 这类表头被算窄而裁字）
         elif ch.islower():
             em += 0.48
+        elif ch == "/":
+            em += 0.28
         else:
             em += 0.34
     return em * size_pt / 72.0

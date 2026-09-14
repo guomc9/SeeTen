@@ -57,7 +57,7 @@ META = {
              "矩形是满的 → **没有 idle、也不用打 mask**。"]),
     ix.KIND_LEFT_UP_CAUSAL: dict(
         en="Left-Up Causal", cn="左上对齐",
-        low=lambda s, kw: "S2 列（同方形折叠）" if s.M() <= s.N() else "S2（虚拟）",
+        low=lambda s, kw: "S2 列（同方形）" if s.M() <= s.N() else "S2（虚拟）",
         tags=lambda s, kw: [("layout", "BSND"),
                             ("", "causal（S1 = S2）" if s.M() <= s.N() else "causal（S1 > S2）"),
                             ("", "MHA"),
@@ -325,7 +325,7 @@ def applicability_rows(kind, shape, mr, kw=None):
         fits = all(ok for _, ok, _ in clauses)
         cond = ("、".join(name for name, ok, _ in clauses if ok) if fits else
                 next(ex for _, ok, ex in clauses if not ok))
-        rows.append((cn, "★ 本页" if kk == kind else ("也能用" if fits else "用不上"),
+        rows.append((cn, "★本页" if kk == kind else ("也能用" if fits else "用不上"),
                      cond))
     return ("规则", "本形状下", "条件"), rows
 
@@ -645,7 +645,7 @@ def draw_overview(prs):
     sd.spec_table(s, 0.73, 1.72,
                   ("规则", "layout", "causal", "MHA/GQA", "列私有", "总轮数", "低位先走哪个轴"),
                   rows,
-                  col_w=(2.30, 1.20, 1.20, 1.10, 0.90, 0.90, 2.30),
+                  col_w=(2.42, 1.20, 1.20, 1.40, 0.90, 0.90, 1.88),
                   row_h=(0.58,) + (0.62,) * 7)
     sd.note(s, 0.73, 7.12,
             "所有规则都是纯算术：(round, core) 一确定，结果就唯一 —— 这就是确定性的来源。",
@@ -845,7 +845,7 @@ def draw_algo_page(prs, num, name, kind, shape, mr, kw, causal):
             title, col_w = "换成按最长 batch 对齐（示意）", (1.55, 0.85, w - 2.40)
         else:
             head, rws = applicability_rows(kind, shape, mr, kw)
-            title, col_w = "同一形状下其它规则能不能用", (1.35, 0.95, w - 2.30)
+            title, col_w = "同一形状下其它规则能不能用", (1.30, 0.84, w - 2.14)
         return (sd.panel_height(len(rws), 0.46),
                 lambda x, y: sd.panel(s, x, y, title, head, rws, col_w=col_w,
                                       row_h=0.52, size=11.5))
@@ -1069,7 +1069,7 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
             title, col_w = "换成按最长 batch 对齐（示意）", (1.55, 0.85, w - 2.40)
         else:
             head, rws = applicability_rows(kind, shape, mr, kw)
-            title, col_w = "同一形状下其它规则能不能用", (1.35, 0.95, w - 2.30)
+            title, col_w = "同一形状下其它规则能不能用", (1.30, 0.84, w - 2.14)
         return (sd.panel_height(len(rws), 0.46),
                 lambda x, y: sd.panel(s, x, y, title, head, rws, col_w=col_w,
                                       row_h=0.46, size=12.0))
