@@ -1106,7 +1106,8 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
 # 不是 event record 端到端计时。数据见 perf_matrix.py：
 #   本仓库 = det-cmp-v3-swizzle（合并 integration/FAG-V3-A5 cube Optimize 后）；
 #   参考仓库 = opst（det 走 torch.use_deterministic_algorithms(True)）。
-# 四页：9.1 确定性开销 / 9.2 det-vs-det / 9.3 nd-vs-nd / 9.4 全矩阵明细。
+# 十页：9.1-9.9 确定性开销 / det-vs-det / nd-vs-nd（各按小/中/大）
+#       + 9.10 / 9.11 vs. ops-transformer 性能对比明细（BSND / TND）。
 import math
 
 import perf_matrix as pm
@@ -1250,8 +1251,8 @@ def draw_perf_page(prs, num, title, sub, size, series_specs, fig_note,
 
 
 def draw_perf_detail_page(prs):
-    """9.10 / 9.11 全矩阵明细：每页一张全宽表（# + shape + 4 核时 + 2 ratio），
-    9.11（TND）末尾补 GM 与总体 pass 两行。"""
+    """9.10 / 9.11 vs. ops-transformer 性能对比明细：每页一张全宽表
+    （# + shape + 4 核时 + 2 ratio），9.11（TND）末尾补 GM 与总体 pass 两行。"""
     od, ond = pm.OURS_DET, pm.OURS_ND
     pd, pnd = pm.OPST_DET, pm.OPST_ND
     det_ratio = _ratio(pd, od)
@@ -1272,11 +1273,12 @@ def draw_perf_detail_page(prs):
     for num, lay in (("9.10", "BSND"), ("9.11", "TND")):
         idxs = _layout_idx(lay)
         s = sd.blank_slide(prs)
-        sd.title(s, f"{num}. 全矩阵明细：{lay}（核时 μs，min of 25）", y=0.62)
+        sd.title(s, f"{num}. vs. ops-transformer 性能对比明细：{lay}（核时 μs，min of 25）",
+                 y=0.62)
         sd.text(s, 0.73, 1.22,
-                f"{len(idxs)} case · 本仓库 det/nd 与 opst det/nd · "
+                f"{len(idxs)} case · 本仓库 det/nd vs. ops-transformer（opst）det/nd · "
                 "ratio = opst / 本仓库（≥ 0.8 达标）· msprof device 侧 kernel 时间"
-                "（Task Duration min）· 空缺 = 参考实现无法运行",
+                "（Task Duration min）· 空缺 = ops-transformer 无法运行",
                 w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
 
         rows = [(f"#{i+1}", pm.SHAPE[i], f(od[i]), f(ond[i]), f(pd[i]),
@@ -1403,7 +1405,7 @@ def draw_perf_pages(prs):
             f"结论：{sz} shape 的 nd 比值 {gm_lay(nd_ratio, 'BSND', sz):.2f}×（BSND）/ "
             f"{gm_lay(nd_ratio, 'TND', sz):.2f}×（TND）；差距来自既有主流水。")
 
-    # ---- 9.10 明细 ----
+    # ---- 9.10 / 9.11 vs. ops-transformer 性能对比明细 ----
     draw_perf_detail_page(prs)
 
 
