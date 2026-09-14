@@ -986,6 +986,8 @@ def check_layout(prs: Presentation, slide_index=None):
             for b in range(a + 1, len(boxes)):
                 n1, x1, y1, w1, h1 = boxes[a]
                 n2, x2, y2, w2, h2 = boxes[b]
+                if n1.startswith("perf-grid") or n2.startswith("perf-grid"):
+                    continue               # 性能图网格线穿过柱子是设计，不算重叠
                 if x1 < x2 + w2 - 0.02 and x2 < x1 + w1 - 0.02 and \
                    y1 < y2 + h2 - 0.02 and y2 < y1 + h1 - 0.02:
                     warnings.append(f"S{i} 元素重叠: {n1} 与 {n2}")
@@ -1096,6 +1098,212 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
         text(slide, x + 0.04, y - 0.46, caption, w=(n_cols + 1) * cell_in, h=0.30,
              size=14.0, bold=True, color=TITLE_TEXT)
     return tbl
+
+
+# ---------------------------------------------------------------- 性能对比（可选）
+
+# 色系取自 DeepSeek-V3 benchmark 图（deepseek-ai/DeepSeek-V3 figures/benchmark.png）：
+# 本仓库主版本 = 宝蓝 + 白色宽斜纹（该图 DeepSeek-V3 的条形），次版本 = 浅蓝；
+# 参考仓库 = 两档灰；其它对比方 = 棕褐 / 米色。性能图只在有 profiling 数据时才画。
+PERF_SELF = "4D6BFE"
+PERF_SELF_ALT = "AAC1FF"
+PERF_REF = "BDBDBD"
+PERF_REF_ALT = "D4D4D4"
+PERF_ACCENT = "E8D2A0"
+PERF_ACCENT_ALT = "F5EBD2"
+PERF_GRID = "E3E3E3"
+PERF_AXIS = "1A1A1A"
+PERF_SUB = "6B6F76"
+PERF_HILITE = "EEF2FF"
+
+
+def _darken(hexv: str, factor: float = 0.80) -> str:
+    r, g, b = (int(hexv[i:i + 2], 16) for i in (0, 2, 4))
+    return f"{int(r * factor):02X}{int(g * factor):02X}{int(b * factor):02X}"
+
+
+def _nice_max(v: float) -> float:
+    import math
+    if v <= 0:
+        return 1.0
+    base = 10 ** math.floor(math.log10(v))
+    for m in (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10):
+        if m * base >= v - 1e-9:
+            return m * base
+    return 10 * base
+
+
+def _bar_shape(slide, x, y, w, h, color, hatch=False, outline=True):
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.dml import MSO_PATTERN
+    shp = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y),
+                                 Inches(w), Inches(h))
+    if hatch:
+        shp.fill.patterned()
+        shp.fill.pattern = MSO_PATTERN.WIDE_UPWARD_DIAGONAL
+        shp.fill.fore_color.rgb = _rgb("FFFFFF")
+        shp.fill.back_color.rgb = _rgb(color)
+    else:
+        shp.fill.solid()
+        shp.fill.fore_color.rgb = _rgb(color)
+    if outline:
+        shp.line.color.rgb = _rgb(_darken(color))
+        shp.line.width = Pt(0.75)
+    else:
+        shp.line.fill.background()
+    try:
+        shp.shadow.inherit = False
+    except Exception:
+        pass
+    return shp
+
+
+def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.35,
+               col_w=0.95, size=11.5, row_h=0.38, best="min", fmt="{:.1f}",
+               highlight=(), note=None):
+    """性能对比表：核时 / 吞吐的横向对比（可选，有 profiling 数据才画）。
+
+    cols      : 列标签（shape / 配置）
+    series    : [(名称, [值, ...]), ...]
+    best      : 每列加粗最优值 —— 核时越小越好用 "min"，吞吐越大越好用 "max"
+    highlight : 行号集合，浅蓝底标出本仓库版本
+    note      : 口径备注。核时表必须注明是 **profiling 核时**、不是 event record
+    """
+    if note is None:
+        note = "profiling 核时（device 侧 kernel 时间），非 event record 端到端计时"
+    n = len(series)
+    tbl = _plain_table(slide, x, y, n + 1, len(cols) + 1,
+                       cell_w=int(first_col_w * 914400), cell_h=int(row_h * 914400))
+    tbl.columns[0].width = Inches(first_col_w)
+    for i in range(1, len(cols) + 1):
+        tbl.columns[i].width = Inches(col_w)
+    for i in range(n + 1):
+        tbl.rows[i].height = Inches(row_h)
+    for c, h_ in enumerate((header,) + tuple(cols)):
+        cell = tbl.cell(0, c)
+        _cell_border(cell)
+        _fill_cell(cell, ON_BLOCK)
+        _write_cell(cell, str(h_), size=size, bold=False, color=TITLE_TEXT,
+                    cjk_font=CJK)
+    picks = [min(s[1][ci] for s in series) if best == "min"
+             else max(s[1][ci] for s in series) for ci in range(len(cols))]
+    for si, s in enumerate(series):
+        label, vals = s[0], s[1]
+        r = si + 1
+        band = (PERF_HILITE if si in highlight
+                else (ZEBRA_FILL if r % 2 == 1 else None))
+        lcell = tbl.cell(r, 0)
+        _cell_border(lcell)
+        if band:
+            _fill_cell(lcell, band)
+        lcolor = TITLE_TEXT
+        if len(s) > 2 and s[2]:
+            lcolor = _darken(s[2], 0.85)
+        _write_cell(lcell, str(label), size=size, bold=False, color=lcolor,
+                    cjk_font=CJK)
+        for ci, v in enumerate(vals):
+            cell = tbl.cell(r, ci + 1)
+            _cell_border(cell)
+            if band:
+                _fill_cell(cell, band)
+            is_best = abs(float(v) - float(picks[ci])) < 1e-9
+            _write_cell(cell, fmt.format(v), size=size, bold=is_best,
+                        color=STRONG_TEXT if is_best else TITLE_TEXT)
+    fit_table(tbl)
+    bottom = y + (n + 1) * row_h
+    if note:
+        text(slide, x, bottom + 0.06, note,
+             w=first_col_w + col_w * len(cols) + 0.30, h=0.26, size=10.5,
+             color=PERF_SUB)
+        bottom += 0.34
+    return bottom
+
+
+def perf_bars(slide, x, y, w, groups, series, chart_h=3.30, ylabel=None,
+              value_fmt="{:.2f}", ymax=None, legend=True, hatch_first=True,
+              value_size=9.0, label_size=11.0, grid_lines=4, bar_gap=0.18,
+              best_series=0, note=None):
+    """性能柱状图：吞吐 / 带宽对比（可选，有 profiling 数据才画）。
+
+    groups : 组标签（shape / 配置），横轴
+    series : [(名称, [每组一个值][, 颜色]), ...]；值用吞吐 / 带宽等"越大越好"的指标
+    hatch_first : 第一条系列用宝蓝 + 白色宽斜纹（DeepSeek-V3 图的主系列样式）
+    note   : 图下口径备注（数据来源、规范化方式等）；返回底边 y
+    """
+    n_g, n_s = len(groups), len(series)
+    colors = []
+    for si, s in enumerate(series):
+        if len(s) > 2:
+            colors.append(s[2])
+        else:
+            colors.append((PERF_SELF, PERF_SELF_ALT, PERF_REF,
+                           PERF_REF_ALT)[si % 4])
+    vals = [[float(s[1][gi]) for gi in range(n_g)] for s in series]
+    vmax = ymax or _nice_max(max(max(v) for v in vals) * 1.12)
+
+    cur_y = y
+    if legend:
+        cur = x
+        for si, s in enumerate(series):
+            chip = _bar_shape(slide, cur, cur_y + 0.03, 0.17, 0.17, colors[si],
+                              hatch=(hatch_first and si == best_series), outline=True)
+            text(slide, cur + 0.21, cur_y, str(s[0]), w=w - (cur - x) - 0.21,
+                 h=0.26, size=11.0, bold=False, color=TITLE_TEXT)
+            cur += 0.21 + est_text_width(str(s[0]), 11.0) + 0.30
+        cur_y += 0.34
+    if ylabel:
+        text(slide, x, cur_y, ylabel, w=w, h=0.26, size=10.5, color=PERF_SUB)
+    ct = cur_y + (0.30 if ylabel else 0.06)      # 图区顶
+    cb = y + chart_h - 0.42                      # 基线
+    x0 = x + 0.46                                # 左侧刻度文字宽
+    pw = w - 0.46
+
+    for i in range(grid_lines + 1):
+        gv = vmax * i / grid_lines
+        gy = cb - (cb - ct) * i / grid_lines
+        if i:
+            line = slide.shapes.add_connector(
+                1, Inches(x0), Inches(gy), Inches(x0 + pw), Inches(gy))
+            line.line.color.rgb = _rgb(PERF_GRID)
+            line.line.width = Pt(0.75)
+            from pptx.enum.dml import MSO_LINE_DASH_STYLE
+            line.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+            # 网格线穿过柱子是图表本意，命名以便 check_layout 不算重叠
+            try:
+                line.name = "perf-grid"
+            except Exception:
+                line._element.xpath('.//*[local-name()="cNvPr"]')[0].set(
+                    "name", "perf-grid")
+        fmt = f"{gv:g}"
+        text(slide, x, gy - 0.11, fmt, w=0.42, h=0.22, size=9.5, color=PERF_SUB,
+             align=PP_ALIGN.RIGHT)
+    base = slide.shapes.add_connector(
+        1, Inches(x0), Inches(cb), Inches(x0 + pw), Inches(cb))
+    base.line.color.rgb = _rgb(PERF_AXIS)
+    base.line.width = Pt(1.0)
+
+    slot = pw / n_g
+    bw = slot * (1 - bar_gap) / n_s
+    for gi, g in enumerate(groups):
+        gx = x0 + gi * slot + slot * bar_gap / 2
+        for si in range(n_s):
+            v = vals[si][gi]
+            bh = (cb - ct) * v / vmax
+            bx = gx + si * bw
+            _bar_shape(slide, bx, cb - bh, bw * 0.88, bh, colors[si],
+                       hatch=(hatch_first and si == best_series), outline=True)
+            main = si == best_series
+            text(slide, bx - 0.08, cb - bh - (0.24 if main else 0.21),
+                 value_fmt.format(v), w=bw * 0.88 + 0.16, h=0.22,
+                 size=value_size + (1.5 if main else 0.0), bold=main,
+                 color=STRONG_TEXT if main else PERF_SUB, align=PP_ALIGN.CENTER)
+        text(slide, x0 + gi * slot, cb + 0.07, str(g), w=slot, h=0.26,
+             size=label_size, bold=True, color=TITLE_TEXT, align=PP_ALIGN.CENTER)
+    bottom = y + chart_h
+    if note:
+        text(slide, x, cb + 0.40, note, w=w, h=0.26, size=10.5, color=PERF_SUB)
+        bottom += 0.30
+    return bottom
 
 
 # ---------------------------------------------------------------- 演示

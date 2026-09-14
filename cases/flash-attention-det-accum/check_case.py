@@ -301,6 +301,36 @@ def main(pptx_path):
     else:
         ok("5b 页已标注选择器不可达")
 
+    # 性能对比页：核时表逐格对照 + 口径标注
+    perf_tbl, perf_texts = None, []
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            if sh.has_text_frame:
+                perf_texts.append(sh.text_frame.text)
+            if (getattr(sh, "has_table", False) and sh.has_table
+                    and sh.table.cell(0, 0).text.strip() == "核时 (μs)"):
+                perf_tbl = sh.table
+    if perf_tbl is None:
+        fail("性能页: 找不到『核时 (μs)』表")
+    else:
+        bad = 0
+        for si, (name, vals) in enumerate(dc.PERF_TIMES.items()):
+            if perf_tbl.cell(si + 1, 0).text.strip() != name:
+                bad += 1
+            for ci, v in enumerate(vals):
+                if perf_tbl.cell(si + 1, ci + 1).text.strip() != f"{v:.1f}":
+                    bad += 1
+        if bad:
+            fail(f"性能页核时表: {bad} 格与 PERF_TIMES 不符")
+        else:
+            ok(f"性能页核时表: {len(dc.PERF_TIMES)}×{len(dc.PERF_SHAPES)} 格与数据一致")
+    blob = " ".join(perf_texts)
+    for token in ("非 event record", "msprof", "v4-det", "opst-det", "倒数"):
+        if token in blob:
+            ok(f"性能页标注含「{token}」")
+        else:
+            fail(f"性能页缺标注「{token}」")
+
     print()
     if FAILURES:
         print(f"FAILED: {len(FAILURES)} 项")

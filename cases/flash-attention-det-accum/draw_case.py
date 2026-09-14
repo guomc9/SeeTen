@@ -1097,6 +1097,61 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
     return s
 
 
+# 性能对比数据（可选页；msprof kernel 时间中位数 μs，来源 .docs/scratch/prof_cmp4.csv，
+# causal BSND、Hq=Hkv=8、D=128；是 device 侧 kernel 时间，不是 event record）
+PERF_SHAPES = ["b1_s1024", "b1_s2048", "b1_s4096", "b1_s8192",
+               "b2_s4096", "b4_s4096", "b8_s4096", "b4_s8192"]
+PERF_TIMES = {
+    "v4-det": [77.2, 187.8, 590.6, 2327.3, 1257.1, 2527.7, 5286.7, 9834.3],
+    "v4-nd": [55.5, 138.9, 498.5, 1905.2, 1087.5, 2416.5, 4984.0, 8703.9],
+    "opst-det": [57.3, 123.9, 393.8, 1501.4, 922.6, 2703.3, 5444.3, 11976.0],
+    "opst-nd": [46.7, 104.3, 338.4, 1348.1, 775.8, 1639.7, 3875.9, 6055.6],
+}
+PERF_COLORS = {"v4-det": sd.PERF_SELF, "v4-nd": sd.PERF_SELF_ALT,
+               "opst-det": sd.PERF_REF, "opst-nd": sd.PERF_REF_ALT}
+
+
+def draw_perf_page(prs):
+    """性能对比页（可选）：本仓库自身版本 + 与参考仓库（opst）的对比。"""
+    SHAPES, TIMES = PERF_SHAPES, PERF_TIMES
+    series = [(k, v, PERF_COLORS[k]) for k, v in TIMES.items()]
+
+    s = sd.blank_slide(prs)
+    sd.title(s, "9. 性能对比：BN2S2 确定性实现 vs 基线 vs opst", y=0.62)
+    sd.text(s, 0.73, 1.22,
+            "本仓库自身：v4-det / v4-nd（基线）；参考仓库：opst-det / opst-nd · "
+            "causal BSND H8 D128 · 数据为 msprof kernel 时间（device 侧），非 event record",
+            w=15.2, h=0.30, size=14.5, color=sd.BODY_TEXT)
+
+    # 上：相对吞吐柱状图（按 shape 归一，opst-det = 1.0）；取 4 个代表 shape
+    bars = [i for i, n in enumerate(SHAPES)
+            if n in ("b1_s4096", "b1_s8192", "b4_s4096", "b4_s8192")]
+    groups = [SHAPES[i] for i in bars]
+    rel = [(k, [TIMES["opst-det"][i] / TIMES[k][i] for i in bars], PERF_COLORS[k])
+           for k in TIMES]
+    sd.perf_bars(s, 0.73, 1.68, 15.2, groups, rel, chart_h=4.50,
+                 ylabel="相对吞吐（opst-det = 1.0，>1 更快）",
+                 note="核时取倒数、按 shape 归一；核时来源：msprof Task Duration 中位数")
+
+    # 下：核时表（全部 8 个 shape）
+    sd.perf_table(s, 0.73, 6.78, SHAPES, series, header="核时 (μs)",
+                  first_col_w=1.35, col_w=1.00, size=11.5, row_h=0.40,
+                  highlight=(0, 1),
+                  note="profiling 核时（msprof Task Duration 中位数，device 侧），"
+                       "非 event record 端到端计时")
+    # 右栏：结论面板，补白并说明两个对比范围
+    sd.panel(s, 10.60, 6.78, "这张图怎么读", ("对比范围", "结论"), [
+        ("本仓库自身", "v4-det 相比 v4-nd 的核时开销\n**1.05–1.39×**，大 shape 更小"),
+        ("vs 参考仓库", "小/中 shape opst 快 1.35–1.55×；\n大 shape v4 核时反超 **3–18%**"),
+        ("口径", "det / nd 都取 profiling 核时，\n不与 event record 混用"),
+    ], col_w=(1.35, 3.60), row_h=0.62, size=11.5)
+    sd.note(s, 0.73, 11.15,
+            "结论：确定性 BN2S2 的开销随 shape 增大而收敛 —— 大 shape 核时反超 opst，"
+            "小 shape 仍是 opst 更快；非确定路径差距是分支既有问题，与本重构无关。",
+            w=15.2, h=0.52)
+    return s
+
+
 def main(path):
     prs = sd.new_deck("4:3")
     draw_overview(prs)
@@ -1108,6 +1163,7 @@ def main(path):
         draw_example_page(prs, i, name, kind, shape, mr, kw, causal)
         if kind == ix.KIND_LEFT_UP_CAUSAL:      # 再加一页更大的非方形例子
             draw_leftup_big_page(prs, i)
+    draw_perf_page(prs)                         # 可选：有 profiling 数据才画
     sd.save(prs, path)
     errors, warns = sd.check_layout(prs)
     cells = sd.check_cells(prs)
