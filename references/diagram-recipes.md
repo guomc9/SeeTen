@@ -192,7 +192,9 @@ flow(cols, [("为什么确定", ["L", "R"], spec_props),     # (名字, 偏好�
 ## 画图前的自检清单
 
 - [ ] `sd.new_deck()` 用了哪个比例？后续所有坐标都按这个比例算。
-- [ ] 跑过 `sd.check_layout(prs)`：0 越界、0 重叠；再跑 `sd.check_cells(prs)`：0 格内顶格。
+- [ ] `sd.check_layout(prs)`：0 越界、0 重叠；`sd.check_cells(prs)`：0 格内问题
+      （**顶格与贴边都算**：文字与左右格线至少 1 个空格）；`sd.check_gaps(prs)`：
+      0 间距过近（表格 / 图片与相邻元素 ≥ 0.15 in）。
 - [ ] 单元格 0.670×0.660 in，边框 `#DDDEDF` 1 pt，文字居中、垂直居中。
 - [ ] 中英分 run：ASCII 用 `Times New Roman`，中文用 `Noto Sans SC`，`a:ea` 也写了。
 - [ ] 表格没有 `tableStyleId`、没有 firstRow/bandRow（生成器已处理，手工改 XML 时注意）。

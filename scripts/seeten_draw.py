@@ -404,14 +404,15 @@ def text_on(fill: str) -> str:
 
 
 def _write_cell(cell, body: str, size=17.5, bold=True, color=ON_BLOCK,
-                font=LATIN, cjk_font=CJK) -> None:
+                font=LATIN, cjk_font=CJK, margin=None) -> None:
+    margin = MARGIN if margin is None else margin
     tf = cell.text_frame
     tf.word_wrap = False
     cell.vertical_anchor = MSO_ANCHOR.MIDDLE
-    cell.margin_left = Emu(MARGIN)
-    cell.margin_right = Emu(0)
-    cell.margin_top = Emu(MARGIN)
-    cell.margin_bottom = Emu(MARGIN)
+    cell.margin_left = Emu(int(margin))
+    cell.margin_right = Emu(int(margin))   # 左右对称：文字离右边线同样留白
+    cell.margin_top = Emu(int(margin))
+    cell.margin_bottom = Emu(int(margin))
     lines = body.split("\n")            # 允许格内两行（"S1=2" / "S2=3"）
     for i, ln in enumerate(lines):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
@@ -667,7 +668,7 @@ def tag_row(slide, x, y, tags, size=13.0, pad=0.16, gap=0.14, h=0.34,
 
 
 def _write_cell_lines(cell, lines, size=11.0, colors=None, font=LATIN,
-                      cjk_font=CJK, line_gap=0.9):
+                      cjk_font=CJK, line_gap=0.9, margin=None):
     """单元格多行文本：每行一个段落，可逐行指定颜色。
 
     行内也能用 `**粗**` / `==强调==`（见 `_rich_segments`），字面标记不会画出来。
@@ -675,9 +676,10 @@ def _write_cell_lines(cell, lines, size=11.0, colors=None, font=LATIN,
     tf = cell.text_frame
     tf.word_wrap = False
     cell.vertical_anchor = MSO_ANCHOR.MIDDLE
-    cell.margin_left = Emu(MARGIN)
-    cell.margin_right = Emu(0)
-    cell.margin_top = Emu(40640)       # 3.2 pt，给两行留出呼吸
+    margin = MARGIN if margin is None else margin
+    cell.margin_left = Emu(int(margin))
+    cell.margin_right = Emu(int(margin))   # 左右对称：文字离右边线同样留白
+    cell.margin_top = Emu(40640)           # 3.2 pt，给两行留出呼吸
     cell.margin_bottom = Emu(40640)
     for i, body in enumerate(lines):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
@@ -857,15 +859,17 @@ def axis_arrow(slide, x, y, length, direction, label, label_off=0.16,
              size=size, bold=label_bold, color=TITLE_TEXT, align=PP_ALIGN.LEFT)
 
 
-def check_cells(prs: Presentation, pad=0.06):
-    """逐格检查：**格内文字会不会顶出格子**（表格的格不换行，超了会横穿到隔壁列）。
+def check_cells(prs: Presentation, pad=0.06, min_spaces=1.0):
+    """逐格检查：格内文字（1）不顶出格子、（2）与左右格线至少留 `min_spaces` 个空格。
 
-    返回 [(页, 表, 行, 列, 文字宽, 格宽), ...]。收尾除了 check_layout 还要跑这个 ——
-    版心检查看不出来"文字压过格线"，而它恰恰是最常见的观感问题。
+    表格的格不换行，超了会横穿到隔壁列；即使没超，文字贴边也会显得挤。
+    返回 [(页, 表, 行, 列, 文字宽, 可用宽, 一侧间距, 问题, 文字), ...]；
+    问题 = "顶格"（文字超出可用宽）或 "贴边"（一侧间距 < 1 个空格）。
+    收尾除了 check_layout 还要跑这个 —— 版心检查看不出来"文字压过格线"。
     """
     out = []
     for i, slide in enumerate(prs.slides, 1):
-        for ti, shp in enumerate(slide.shapes):
+        for shp in slide.shapes:
             if not (getattr(shp, "has_table", False) and shp.has_table):
                 continue
             tbl = shp.table
@@ -883,13 +887,73 @@ def check_cells(prs: Presentation, pad=0.06):
                     avail_w = max(0.05, widths[c] - ml - mr)
                     avail_h = max(0.05, heights[r] - 0.09)
                     wide = [est_text_width(ln, sz) for ln, sz in zip(lines, sizes)]
-                    tall = sum(max(sz * 1.30 / 72.0, 0.12) for sz in sizes)
-                    if wide and max(wide) > avail_w + pad:
-                        out.append((i, shp.name, r, c, round(max(wide), 2),
-                                    round(avail_w, 2), max(lines, key=len)[:22]))
+                    tw = max(wide) if wide else 0.0
+                    sz = max(sizes) if sizes else 12.0
+                    tall = sum(max(s * 1.30 / 72.0, 0.12) for s in sizes)
+                    # 文字水平居中：一侧间距 = 格内边距 + 剩余空间的一半
+                    slack = avail_w - tw
+                    gap = min(ml, mr) + (slack / 2.0 if slack > 0 else 0.0)
+                    need = max(0.04, 0.30 * sz / 72.0) * min_spaces
+                    label = max(lines, key=len)[:22] if lines else ""
+                    if tw > avail_w + pad:
+                        out.append((i, shp.name, r, c, round(tw, 2),
+                                    round(avail_w, 2), round(gap, 3), "顶格", label))
                     elif tall > avail_h + pad:
-                        out.append((i, shp.name, r, c, round(tall, 2),
-                                    round(avail_h, 2), f"[竖排] {lines[0][:18]}"))
+                        out.append((i, shp.name, r, c, round(tw, 2),
+                                    round(avail_h, 2), round(gap, 3), "顶格", label))
+                    elif lines and lines[0].strip() and gap < need:
+                        out.append((i, shp.name, r, c, round(tw, 2),
+                                    round(avail_w, 2), round(gap, 3), "贴边", label))
+    return out
+
+
+def check_gaps(prs: Presentation, min_gap=0.15):
+    """检查相邻元素（表格 / 文字块）之间的间距，太挤会显得拥挤。
+
+    水平范围交叠的元素对看垂直间隙，垂直范围交叠的看水平间隙。返回
+    [(页, 元素A, 元素B, 方向, 间隙), ...]；性能图网格线（perf-grid）不参与。
+    """
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    out = []
+    for i, slide in enumerate(prs.slides, 1):
+        boxes = []
+        for shp in slide.shapes:
+            if shp.name.startswith("perf-grid") or shp.name.startswith("Connector"):
+                continue
+            if getattr(shp, "has_table", False) and shp.has_table:
+                tw, th = table_extent(shp.table)
+                boxes.append((shp.name, shp.left / 914400, shp.top / 914400,
+                              tw, th, "table"))
+                continue
+            if shp.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                l, t, w, h = _geom(shp)
+                boxes.append((shp.name, l, t, w, h, "figure"))
+                continue
+            ext = _text_extents(shp) if shp.has_text_frame else []
+            if ext and shp.shape_type == MSO_SHAPE_TYPE.TEXT_BOX:
+                x0 = min(e[0] for e in ext)
+                y0 = min(e[1] for e in ext)
+                x1 = max(e[0] + e[2] for e in ext)
+                y1 = max(e[1] + e[3] for e in ext)
+                boxes.append((shp.name, x0, y0, x1 - x0, y1 - y0, "text"))
+            else:
+                l, t, w, h = _geom(shp)
+                boxes.append((shp.name, l, t, w, h, "shape"))
+        for a in range(len(boxes)):
+            for b in range(a + 1, len(boxes)):
+                n1, x1, y1, w1, h1, k1 = boxes[a]
+                n2, x2, y2, w2, h2, k2 = boxes[b]
+                # 只关心"表格/图片"参与的对：文字行的固定行距不算挤
+                if k1 not in ("table", "figure") and k2 not in ("table", "figure"):
+                    continue
+                if x1 < x2 + w2 and x2 < x1 + w1:          # 水平交叠 → 垂直间隙
+                    gap = max(y2 - (y1 + h1), y1 - (y2 + h2))
+                    if 0 <= gap < min_gap:
+                        out.append((i, n1, n2, "垂直", round(gap, 3)))
+                elif y1 < y2 + h2 and y2 < y1 + h1:        # 垂直交叠 → 水平间隙
+                    gap = max(x2 - (x1 + w1), x1 - (x2 + w2))
+                    if 0 <= gap < min_gap:
+                        out.append((i, n1, n2, "水平", round(gap, 3)))
     return out
 
 
@@ -1040,7 +1104,7 @@ def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None,
 def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
               cell_in=0.62, row_label="S1", col_label="S2",
               empty_text="空闲", label_size=13.0, shade_count=None,
-              head_size=12.0):
+              head_size=12.0, cell_margin=None):
     """带轴头的覆盖图：列头 `S2=1..n`、行头 `S1=1..m`、格内是内容 + lane 配色。
 
     cells: {(r-1, c-1): (文本, lane 序号[, shade 序号])}；缺的格子填 hole 灰。
@@ -1050,6 +1114,7 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
     """
     def _axis_label(label, v):
         return label.format(v=v) if "{v}" in label else f"{label}={v}"
+    cm = cell_margin if cell_margin is not None else min(MARGIN, cell_in * 0.08)
     tbl = _plain_table(slide, x, y, n_rows + 1, n_cols + 1,
                        cell_w=int(cell_in * 914400), cell_h=int(cell_in * 914400))
     for i in range(n_cols + 1):
@@ -1072,20 +1137,21 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
         if c:
             _fill_cell(cell, ON_BLOCK)
             _write_cell_lines(cell, [_axis_label(col_label, c)], size=head_size,
-                              colors=[TITLE_TEXT])
+                              colors=[TITLE_TEXT], margin=cm)
     for r in range(1, n_rows + 1):
         cell = tbl.cell(r, 0)
         _cell_border(cell)
         _fill_cell(cell, ON_BLOCK)
         _write_cell_lines(cell, [_axis_label(row_label, r)], size=head_size,
-                          colors=[TITLE_TEXT])
+                          colors=[TITLE_TEXT], margin=cm)
         for c in range(1, n_cols + 1):
             cell = tbl.cell(r, c)
             _cell_border(cell)
             got = cells.get((r - 1, c - 1))
             if got is None:
                 _fill_cell(cell, hole["fill"])
-                _write_cell_lines(cell, [empty_text], size=11.0, colors=[hole["text"]])
+                _write_cell_lines(cell, [empty_text], size=11.0, colors=[hole["text"]],
+                                  margin=cm)
             else:
                 label, lane = got[0], got[1]
                 shade = got[2] if len(got) > 2 else 0
@@ -1093,7 +1159,7 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
                 _fill_cell(cell, col["fill"])
                 lines = str(label).split("\n")          # 允许格内两行
                 _write_cell_lines(cell, lines, size=label_size,
-                                  colors=[col["text"]] * len(lines))
+                                  colors=[col["text"]] * len(lines), margin=cm)
     if caption:
         text(slide, x + 0.04, y - 0.46, caption, w=(n_cols + 1) * cell_in, h=0.30,
              size=14.0, bold=True, color=TITLE_TEXT)
@@ -1160,7 +1226,8 @@ def _bar_shape(slide, x, y, w, h, color, hatch=False, outline=True):
 
 def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.35,
                col_w=0.95, size=11.5, row_h=0.38, best="min", fmt="{:.1f}",
-               fmts=None, best_rows=None, highlight=(), note=None):
+               fmts=None, best_rows=None, best_groups=None, highlight=(),
+               note=None):
     """性能对比表：核时 / 吞吐的横向对比（可选，有 profiling 数据才画）。
 
     cols      : 列标签（shape / 配置）
@@ -1188,10 +1255,12 @@ def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.3
         _write_cell(cell, str(h_), size=size, bold=False, color=TITLE_TEXT,
                     cjk_font=CJK)
     fmts = fmts or [fmt] * n
-    best_rows = list(range(n)) if best_rows is None else list(best_rows)
-    picks = [min(series[ri][1][ci] for ri in best_rows) if best == "min"
-             else max(series[ri][1][ci] for ri in best_rows)
-             for ci in range(len(cols))]
+    if best_groups is None:
+        best_groups = [list(range(n)) if best_rows is None else list(best_rows)]
+    row_group = {ri: gi for gi, grp in enumerate(best_groups) for ri in grp}
+    picks = [[min(series[ri][1][ci] for ri in grp) if best == "min"
+              else max(series[ri][1][ci] for ri in grp)
+              for ci in range(len(cols))] for grp in best_groups]
     for si, s in enumerate(series):
         label, vals = s[0], s[1]
         r = si + 1
@@ -1211,16 +1280,18 @@ def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.3
             _cell_border(cell)
             if band:
                 _fill_cell(cell, band)
-            is_best = si in best_rows and abs(float(v) - float(picks[ci])) < 1e-9
+            gi = row_group.get(si)
+            is_best = (gi is not None
+                       and abs(float(v) - float(picks[gi][ci])) < 1e-9)
             _write_cell(cell, fmts[si].format(v), size=size, bold=is_best,
                         color=STRONG_TEXT if is_best else TITLE_TEXT)
     fit_table(tbl)
     bottom = y + (n + 1) * row_h
     if note:
-        text(slide, x, bottom + 0.06, note,
+        text(slide, x, bottom + 0.16, note,
              w=first_col_w + col_w * len(cols) + 0.30, h=0.26, size=10.5,
              color=PERF_SUB)
-        bottom += 0.34
+        bottom += 0.44
     return bottom
 
 
@@ -1384,8 +1455,8 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
     slide.shapes.add_picture(buf, Inches(x), Inches(y), width=Inches(w))
     bottom = y + h
     if note:
-        text(slide, x, bottom + 0.06, note, w=w, h=0.26, size=10.5, color=PERF_SUB)
-        bottom += 0.34
+        text(slide, x, bottom + 0.12, note, w=w, h=0.26, size=10.5, color=PERF_SUB)
+        bottom += 0.40
     return bottom
 
 

@@ -143,7 +143,7 @@ def page_text(kind, shape, mr, kw):
                 "（它只作 Left-Up 的内部委托，不单独被选中）",
             ex_sub="先看下面的虚拟矩形（两个三角拼成的满矩形），再对照上面两张真实的块图",
             read=["同一个格子在两张真实图上各出现一次（颜色不同 = batch 不同）。",
-                  "**灰格 = causal 区外**（打 mask，不参与累加）；一条 core 在两个 batch 间来回切 → 每核要**两个累加 buffer**。"])
+                  "**灰格 = causal 区外**（打 mask，不加）；一条 core 在 batch 间来回切 → 每核要**两个 buffer**。"])
     if kind == ix.KIND_LEFT_UP_CAUSAL:
         square = m <= n          # S1 = S2（或更短）时这条规则委托给方形折叠
         return dict(
@@ -533,11 +533,11 @@ def repeat_rows(shape):
     return rows
 
 
-def repeat_panel(slide, x, y, shape, col_w=None):
+def repeat_panel(slide, x, y, shape, col_w=None, row_h=0.38):
     """同一个值为什么会重复出现 —— 放在哪一栏就按哪一栏的宽度分两列。"""
     rows = repeat_rows(shape)
     return sd.panel(slide, x, y, "同一个值为什么会重复出现", ("看到的现象", "为什么"), rows,
-                    col_w=col_w or (2.05, 4.90), row_h=0.38, size=12.0)
+                    col_w=col_w or (2.25, 4.70), row_h=row_h, size=12.0)
 
 
 # ---------------------------------------------------------------- 排版流
@@ -552,7 +552,7 @@ class Col:
         return self.y + gap + h <= self.bottom + 1e-6
 
 
-def flow(cols, items, gap=0.26):
+def flow(cols, items, gap=0.38):
     """把表按优先级放进"放得下的那一栏"。
 
     items: [(名字, 偏好栏顺序, make)]，make(栏宽) 给出 (高度, 画法) 或 None（这栏不合适）。
@@ -594,19 +594,22 @@ def _virtual_grid(slide, x, y, n_cols, n_rows, cells, lane_set=LANE_SET,
         sd._cell_border(cell)
         if c:
             sd._fill_cell(cell, sd.ON_BLOCK)
-            sd._write_cell_lines(cell, [f"虚拟列{c}"], size=label_size, colors=[sd.TITLE_TEXT])
+            sd._write_cell_lines(cell, [f"虚拟列{c}"], size=label_size,
+                                 colors=[sd.TITLE_TEXT], margin=45720)
     for r in range(1, n_rows + 1):
         cell = tbl.cell(r, 0)
         sd._cell_border(cell)
         sd._fill_cell(cell, sd.ON_BLOCK)
-        sd._write_cell_lines(cell, [f"虚拟行{r}"], size=label_size, colors=[sd.TITLE_TEXT])
+        sd._write_cell_lines(cell, [f"虚拟行{r}"], size=label_size,
+                                 colors=[sd.TITLE_TEXT], margin=45720)
         for c in range(1, n_cols + 1):
             cell = tbl.cell(r, c)
             sd._cell_border(cell)
             got = cells.get((r - 1, c - 1))
             if got is None:
                 sd._fill_cell(cell, hole["fill"])
-                sd._write_cell_lines(cell, ["用不到"], size=label_size - 0.5, colors=[hole["text"]])
+                sd._write_cell_lines(cell, ["用不到"], size=label_size - 0.5,
+                                     colors=[hole["text"]], margin=45720)
             else:
                 label, lane = got[0], got[1]
                 shade = got[2] if len(got) > 2 else 0
@@ -614,9 +617,10 @@ def _virtual_grid(slide, x, y, n_cols, n_rows, cells, lane_set=LANE_SET,
                        else colors[lane % 8])
                 sd._fill_cell(cell, col["fill"])
                 sd._write_cell_lines(cell, label.split(), size=label_size,
-                                     colors=[col["text"]] * len(label.split()))
-    sd.text(slide, x + 0.04, y - 0.40, "fold 后的虚拟矩形（行 = 虚拟 S1，列 = 虚拟 S2）",
-            w=(n_cols + 1) * cell_w, h=0.30, size=13.0, bold=True)
+                                     colors=[col["text"]] * len(label.split()),
+                                     margin=45720)
+    sd.text(slide, x + 0.04, y - 0.46, "fold 后的虚拟矩形（行 = 虚拟 S1，列 = 虚拟 S2）",
+            w=max((n_cols + 1) * cell_w, 4.20), h=0.30, size=13.0, bold=True)
     return y + (n_rows + 1) * cell_h
 
 
@@ -641,36 +645,36 @@ def draw_overview(prs):
     sd.spec_table(s, 0.73, 1.72,
                   ("规则", "layout", "causal", "MHA/GQA", "列私有", "总轮数", "低位先走哪个轴"),
                   rows,
-                  col_w=(2.55, 1.10, 1.15, 0.95, 0.95, 0.95, 2.10),
+                  col_w=(2.30, 1.20, 1.20, 1.10, 0.90, 0.90, 2.30),
                   row_h=(0.58,) + (0.62,) * 7)
-    sd.note(s, 0.73, 7.00,
+    sd.note(s, 0.73, 7.12,
             "所有规则都是纯算术：(round, core) 一确定，结果就唯一 —— 这就是确定性的来源。",
             w=15.2, h=0.36)
-    sd.text(s, 0.73, 7.40, "表中「causal」= 本页例子的形状；GQA / TND-GQA 的 causal 由 epilogue mask 处理。",
+    sd.text(s, 0.73, 7.52, "表中「causal」= 本页例子的形状；GQA / TND-GQA 的 causal 由 epilogue mask 处理。",
             w=9.90, h=0.28, size=13, color=sd.BODY_TEXT)
-    sd.text(s, 0.73, 7.72, "怎么读后面的例子", w=13.0, h=0.34, size=18, bold=True)
+    sd.text(s, 0.73, 7.90, "怎么读后面的例子", w=13.0, h=0.34, size=18, bold=True)
     for i, line in enumerate([
             "· 第 1 页先认公用的轴遍历顺序 b → n2 → s2 → s1 → d，以及 dS 的一列怎么变成 dK/dV 的一行。",
             "· 算法页：伪代码讲逻辑 → 任务矩阵（行 = round，列 = core）→ 为什么这样分。",
             "· 例子页：网格纵轴 S1、横轴 S2，格内写「哪条 core / 第几轮」；灰格 = 这一轮这条 core 空闲。",
             "· 颜色只编码两个轴：颜色 = 哪个 batch，同一个颜色的深浅 = 第几条 KV 列（S2）；S1 不参与配色。"]):
-        sd.text(s, 0.73, 8.22 + i * 0.42, line, w=9.90, h=0.36, size=15.0,
+        sd.text(s, 0.73, 8.42 + i * 0.42, line, w=9.90, h=0.36, size=15.0,
                 color=sd.BODY_TEXT)
-    sd.panel(s, 10.60, 1.72, "格子里写什么", ("记号", "含义"),
+    sd.panel(s, 11.05, 1.72, "格子里写什么", ("记号", "含义"),
              [("B", "batch"), ("N2", "KV head"), ("G", "GQA 里的 Q head"),
               ("S1", "Q 方向第几块（128 行）"), ("S2", "KV 方向第几块（128 列）"),
-              ("D", "head dim，tile 内不切分")], col_w=(1.10, 4.15), row_h=0.44,
+              ("D", "head dim，tile 内不切分")], col_w=(1.05, 3.95), row_h=0.44,
              size=13.0)
-    sd.panel(s, 10.60, 5.62, "每个例子都满足的三条不变量", ("不变量", "含义"),
+    sd.panel(s, 11.05, 5.62, "每个例子都满足的三条不变量", ("不变量", "含义"),
              [("任务不重复", "每个块只被派给一个 (round, core)"),
               ("同一轮 S1 不撞", "各核这一轮写的输出块互不相同"),
               ("列私有", "swizzle 类：一条列只归一条 core")],
-             col_w=(1.85, 3.40), row_h=0.52, size=12.5)
-    sd.panel(s, 10.60, 8.44, "七种规则归成三条路线", ("路线", "用它的规则"),
+             col_w=(1.75, 3.25), row_h=0.52, size=12.5)
+    sd.panel(s, 11.05, 8.44, "七种规则归成三条路线", ("路线", "用它的规则"),
              [("列私有", "1 Dense Swizzle、4 Left-Up、6 TND"),
               ("切片 + gcd 修正", "5 GQA Dense（核数不受 S1 块数限制）"),
               ("按面积展平", "7 TND GQA（变长 batch，不分列）")],
-             col_w=(1.75, 3.50), row_h=0.52, size=12.5)
+             col_w=(1.65, 3.35), row_h=0.52, size=12.5)
     return s
 
 
@@ -704,19 +708,19 @@ def draw_axis_page(prs):
                     kvHeadNum=1, coreNum=dk)
     tdemo = ix.tasks_of(ix.KIND_DENSE_SWIZZLE, demo, dmr)
     cell, gy = 0.68, 3.30
-    sd.text(s, 1.70, 2.92, "① task id 铺开的顺序", w=3.20, h=0.28, size=14.0, bold=True)
+    sd.text(s, 1.70, 2.84, "① task id 铺开的顺序", w=3.20, h=0.28, size=14.0, bold=True)
     order = {(r, c): (str(c * dm + r + 1), 0) for r in range(dm) for c in range(dn)}
     sd.axis_grid(s, 1.70, gy, dm, dn, order, lane_set="plain", cell_in=cell,
                  label_size=14.0)
     sd.axis_arrow(s, 1.24, gy, (dm + 1) * cell - 0.46, "down", "S1")
-    sd.text(s, 5.90, 2.92, "② 分派：颜色 = core", w=3.20, h=0.28, size=14.0, bold=True)
+    sd.text(s, 5.90, 2.84, "② 分派：颜色 = core", w=3.20, h=0.28, size=14.0, bold=True)
     disp = {(c.s1, c.s2): (f"C{j}\n第{r}轮", j - 1) for (j, r), c in tdemo.items()}
     sd.axis_grid(s, 5.90, gy, dm, dn, disp, lane_set=LANE_SET, cell_in=cell,
                  label_size=11.0)
 
     # ③ dS 的一列 → dK/dV 的一行：列私有的理由
     hx, hy = 1.70, 6.72
-    sd.text(s, hx, 6.34, "③ dS 的一列 → dK/dV 的一行（同一个 KV 块）",
+    sd.text(s, hx, 6.26, "③ dS 的一列 → dK/dV 的一行（同一个 KV 块）",
             w=6.00, h=0.28, size=14.0, bold=True)
     ds_cells = {(r, c): ("", 1 if c == dn - 1 else 0) for r in range(dm) for c in range(dn)}
     sd.axis_grid(s, hx, hy, dm, dn, ds_cells, lane_set="plain", cell_in=cell,
@@ -747,7 +751,7 @@ def draw_axis_page(prs):
                 color=sd.BODY_TEXT)
     ry = repeat_panel(s, 10.60, 4.28, ix.Shape(batch=2, qSeqLen=384, kvSeqLen=384,
                                                 qHeadNum=1, kvHeadNum=1, coreNum=2),
-                      col_w=(1.95, 3.30)) + 0.40
+                      col_w=(2.25, 3.00)) + 0.40
     sd.panel(s, 10.60, ry, "task id 展开（1 个 batch，9 个块）",
              ("task id", "B", "N2", "S2", "S1", "core"),
              [(str(t), "1", "1", str((t - 1) // dm + 1), str((t - 1) % dm + 1),
@@ -818,9 +822,9 @@ def draw_algo_page(prs, num, name, kind, shape, mr, kw, causal):
     # 矩阵和"为什么这样分"讲完之后，左下半和右栏还剩多少就补多少
     def spec_numbers(w):
         rws = numbers_rows(kind, shape, mr, kw)
-        return (sd.panel_height(len(rws), 0.44),
+        return (sd.panel_height(len(rws), 0.40),
                 lambda x, y: sd.panel(s, x, y, "这个例子的数字", ("项", "值"), rws,
-                                      col_w=(w - 1.40, 1.40), row_h=0.44, size=12.5))
+                                      col_w=(w - 1.40, 1.40), row_h=0.40, size=12.5))
 
     def spec_percore(w):
         head, rws = lane_column_rows(kind, shape, mr, kw)
@@ -830,7 +834,7 @@ def draw_algo_page(prs, num, name, kind, shape, mr, kw, causal):
 
     def spec_repeat(w):
         return (sd.panel_height(4, 0.38),
-                lambda x, y: repeat_panel(s, x, y, shape, col_w=(2.05, w - 2.05)))
+                lambda x, y: repeat_panel(s, x, y, shape, col_w=(2.25, w - 2.25), row_h=0.36))
 
     def spec_other(w):
         if kind in (ix.KIND_DENSE_SWIZZLE, ix.KIND_DENSE_INDEX):
@@ -851,8 +855,8 @@ def draw_algo_page(prs, num, name, kind, shape, mr, kw, causal):
          [("这个例子的数字", ["R", "L"], spec_numbers),
           ("其它规则", ["R", "L"], spec_other),
           ("每条 core 负责哪些列", ["L", "R"], spec_percore),
-          ("同一个值为什么会重复", ["L", "R"], spec_repeat)], gap=0.22)
-    sd.note(s, 0.73, 11.15, txt["key"], w=15.2, h=0.52)
+          ("同一个值为什么会重复", ["L", "R"], spec_repeat)], gap=0.32)
+    sd.note(s, 0.73, 11.22, txt["key"], w=15.2, h=0.52)
     return s
 
 
@@ -890,9 +894,9 @@ def draw_leftup_big_page(prs, num):
     sd.axis_arrow(s, LEFTX - 0.68, gy, (m + 1) * cell - cell * 0.6, "down", "S1")
     # S2 箭头省掉：这一页副标题更长，S2 标签会压到副标题上；列头本身已写 S2=1..3
     # 左栏下方：折叠出来的虚拟矩形（行 = 虚拟 S1，列 = 虚拟 S2）
-    left_bottom = _virtual_grid(s, LEFTX, 5.95, n, vm, virtual_cells(
+    left_bottom = _virtual_grid(s, LEFTX, 6.15, n, vm, virtual_cells(
         ix.KIND_LEFT_UP_CAUSAL, shape, mr, {}), lane_set=LANE_SET,
-        cell_w=0.64, cell_h=0.60, shade_count=n_max, label_size=10.0)
+        cell_w=0.64, cell_h=0.58, shade_count=n_max, label_size=10.0)
 
     def spec_percore(w):
         head, rows = lane_column_rows(ix.KIND_LEFT_UP_CAUSAL, shape, mr, {})
@@ -925,9 +929,9 @@ def draw_leftup_big_page(prs, num):
           ("代价数字", ["L", "R"], spec_numbers),
           ("重复解释", ["L", "R"], lambda w: (
               sd.panel_height(4, 0.38),
-              lambda x, y: repeat_panel(s, x, y, shape, col_w=(2.05, w - 2.05))))])
+              lambda x, y: repeat_panel(s, x, y, shape, col_w=(2.25, w - 2.25), row_h=0.36)))])
 
-    sd.note(s, 0.73, 10.32,
+    sd.note(s, 0.73, 10.42,
             f"形状一变，折叠几何跟着变：虚拟高从 m 变成 2m-n+1 = {vm}，但规则本身没变。",
             w=9.70, h=0.36)
     sd.text(s, 0.73, 11.08, "· 每个核守一条虚拟列，落到真实坐标上就是**两个 batch 各一条 S2 列**。",
@@ -994,7 +998,7 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
     v_cells = virtual_cells(kind, shape, mr, kw) if causal_kind else None
 
     if causal_kind and wide:
-        left_bottom = _virtual_grid(s, LEFTX, left_bottom + 0.55, v_cols, v_rows,
+        left_bottom = _virtual_grid(s, LEFTX, left_bottom + 0.85, v_cols, v_rows,
                                     v_cells, lane_set=LANE_SET,
                                     shade_count=n_max) + 0.35
 
@@ -1010,7 +1014,7 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
 
     def spec_repeat(w):
         return (sd.panel_height(4, 0.38),
-                lambda x, y: repeat_panel(s, x, y, shape, col_w=(2.05, w - 2.05)))
+                lambda x, y: repeat_panel(s, x, y, shape, col_w=(2.25, w - 2.25), row_h=0.36))
 
     def spec_percore(w):
         head, rows = lane_column_rows(kind, shape, mr, kw)
@@ -1159,14 +1163,16 @@ def draw_perf_page(prs):
         ("opst det/nd 开销 (×)", div("opst-det", "opst-nd")),
         ("det 对比 opst/本仓库 (×)", div("opst-det", "v4-det")),
     ]
-    sd.perf_table(s, 0.73, 5.95, PERF_SHAPES, series, header="核时 (μs)",
-                  first_col_w=1.95, col_w=1.05, size=12.5, row_h=0.40,
-                  fmts=["{:.1f}"] * 4 + ["{:.2f}"] * 3, best_rows=(0, 1, 2, 3),
+    sd.perf_table(s, 0.73, 6.15, PERF_SHAPES, series, header="核时 (μs)",
+                  first_col_w=2.10, col_w=1.02, size=12.5, row_h=0.40,
+                  fmts=["{:.1f}"] * 4 + ["{:.2f}"] * 3,
+                  best_groups=[[0, 2], [1, 3]],      # det 组 / nd 组 各自标最优
                   highlight=(0, 1),
                   note="profiling 核时（msprof Task Duration 中位数，device 侧），"
-                       "非 event record 端到端计时")
+                       "非 event record 端到端计时；加粗 = deterministic / "
+                       "nondeterministic 两组各自的最优")
     # 右栏：三个对比怎么读
-    sd.panel(s, 11.30, 5.95, "三个对比怎么读", ("对比", "结论"), [
+    sd.panel(s, 11.30, 6.15, "三个对比怎么读", ("对比", "结论"), [
         ("det vs det", "opst-det / 本仓库-det：大 shape **>1**\n（本仓库更快），小 shape <1"),
         ("本仓库确定性开销", "det / nd：**1.05–1.22×**，\n大 shape 开销更小"),
         ("opst 确定性开销", "det / nd：1.11–1.98×，\n比本仓库高不少"),
@@ -1194,10 +1200,15 @@ def main(path):
     sd.save(prs, path)
     errors, warns = sd.check_layout(prs)
     cells = sd.check_cells(prs)
+    gaps = sd.check_gaps(prs)
     print(f"wrote {path}  ({len(prs.slides._sldIdLst)} 页)")
-    print(f"版心检查: {len(errors)} 越界 / {len(warns)} 重叠 / {len(cells)} 格内顶格")
-    for c in cells[:10]:
-        print(f"  □ S{c[0]} {c[1]} r{c[2]}c{c[3]}: 文字 {c[4]} > 可用 {c[5]}  「{c[6]}」")
+    print(f"版心检查: {len(errors)} 越界 / {len(warns)} 重叠 / "
+          f"{len(cells)} 格内问题 / {len(gaps)} 间距过近")
+    for c in cells[:14]:
+        print(f"  □ S{c[0]} {c[1]} r{c[2]}c{c[3]}: {c[7]} 文字 {c[4]} / 可用 {c[5]}"
+              f" / 一侧 {c[6]}  「{c[8]}」")
+    for g in gaps[:14]:
+        print(f"  ⇔ S{g[0]} {g[1]} ↔ {g[2]}: {g[3]}间隙 {g[4]}")
     for e in errors[:10]:
         print("  !", e)
     for w in warns[:10]:

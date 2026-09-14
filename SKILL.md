@@ -128,10 +128,12 @@ SeeTen/
     `★ 生产选中` / `↪ 仅内部委托`（只被别的规则内部调用）/ `⚠ 示意（选择器不可达）`；
     示意分支必须标在页面上，不能只写在 case README 里。伪代码公式要能代回本页表格复现，
     结论句要能被本页数据证实 —— 详细约定见 `references/style-spec.md` §7。
-16. **收尾五件事，缺一不算画完**：
-    ① `sd.check_layout(prs)` 0 越界 0 重叠 → ② `sd.check_cells(prs)` 0 格内顶格 →
-    ③ `verify_demo.py` 表样式/字体回读一致 → ④ `render_deck.ps1` 渲染后逐页看图 →
-    ⑤ case 的 `check_case.py`（公式回代 + 结论句核对）0 失配。
+16. **收尾六件事，缺一不算画完**：
+    ① `sd.check_layout(prs)` 0 越界 0 重叠 → ② `sd.check_cells(prs)` 0 格内问题
+    （**顶格与贴边都算**：文字距左右格线至少 1 个空格）→ ③ `sd.check_gaps(prs)`
+    0 间距过近（表格 / 图片与相邻元素 ≥ 0.15 in）→ ④ `verify_demo.py` 表样式/字体
+    回读一致 → ⑤ `render_deck.ps1` 渲染后逐页看图 → ⑥ case 的 `check_case.py`
+    （公式回代 + 结论句核对）0 失配。
 17. **性能对比图可选，只有拿到数据才画。** 分清三类对比：det vs det（本仓库 vs
     参考仓库 opst）、确定性开销（各仓库内部 det / nd）、本仓库自身版本。核时**表**
     只认 profiling 的 device 侧 kernel 时间，**不能用 event record 端到端时间**
