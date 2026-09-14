@@ -1237,7 +1237,8 @@ def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.3
 
     cols      : 列标签（shape / 配置）
     series    : [(名称, [值, ...]), ...]
-    best      : 每列加粗最优值 —— 核时越小越好用 "min"，吞吐越大越好用 "max"
+    best      : 每列加粗最优值 —— 核时越小越好用 "min"，吞吐越大越好用 "max"；
+                明细表不需要加粗时传 best=None"
     fmts      : 逐行格式（缺省全部用 fmt）；比值行可单独用 "{:.2f}"
     best_rows : 参与"最优加粗"的行号（缺省全部；比值行语义不一可只留原始数据行）
     highlight : 行号集合，浅蓝底标出本仓库版本
@@ -1261,11 +1262,14 @@ def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.3
                     cjk_font=CJK)
     fmts = fmts or [fmt] * n
     if best_groups is None:
-        best_groups = [list(range(n)) if best_rows is None else list(best_rows)]
+        best_groups = ([] if best is None else
+                       [list(range(n)) if best_rows is None
+                        else list(best_rows)])
     row_group = {ri: gi for gi, grp in enumerate(best_groups) for ri in grp}
-    picks = [[min(series[ri][1][ci] for ri in grp) if best == "min"
-              else max(series[ri][1][ci] for ri in grp)
-              for ci in range(len(cols))] for grp in best_groups]
+    picks = ([] if best is None else
+             [[min(series[ri][1][ci] for ri in grp) if best == "min"
+               else max(series[ri][1][ci] for ri in grp)
+               for ci in range(len(cols))] for grp in best_groups])
     for si, s in enumerate(series):
         label, vals = s[0], s[1]
         r = si + 1
@@ -1286,8 +1290,8 @@ def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.3
             if band:
                 _fill_cell(cell, band)
             gi = row_group.get(si)
-            is_best = (gi is not None
-                       and abs(float(v) - float(picks[gi][ci])) < 1e-9)
+            is_best = (gi is not None and
+                       abs(float(v) - float(picks[gi][ci])) < 1e-9)
             _write_cell(cell, fmts[si].format(v), size=size, bold=is_best,
                         color=STRONG_TEXT if is_best else TITLE_TEXT)
     fit_table(tbl)
@@ -1397,7 +1401,10 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
              ref = 参考虚线值（如 1.0）；split = 按阈值逐柱上色（≥split 主色、
              否则 split_lo，默认灰）—— 用于"比值 < 1 标灰"这类好坏分侧；
              bar_w = 单柱占组槽的宽度比例（缺省 0.80/系列数；单系列图建议 0.4–0.5，
-             柱子细一点更透气）。
+             柱子细一点更透气）；
+             xrot = 横轴标签旋转角度（case 多时用 45–90，缺省 0）；
+             show_values = 是否在每根柱顶标数值（缺省 True；柱子太密时设 False，
+             数值交给图下的小表）；value_size = 柱顶数值字号（缺省 7.5）。
     font   : matplotlib 字体族。缺省 DejaVu Sans —— 没有 CJK 字体时请把图内文字写成
              英文，中文说明留在页面文字 / 表格里。
     返回底边 y（含 note）。依赖 matplotlib（可选依赖；缺了请退回 perf_bars）。
@@ -1448,11 +1455,13 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
                            linewidth=(0.0 if hatched else 0.7),
                            hatch=("///" if hatched else None),
                            label=label if gi_ == label_gi else None)[0]
-                ax.text(b.get_x() + b.get_width() / 2.0, v,
-                        p.get("value_fmt", "{:.2f}").format(v),
-                        ha="center", va="bottom", zorder=4,
-                        fontsize=7.5, fontweight=("bold" if hatched else "normal"),
-                        color=("#1A1A1A" if hatched else "#" + PERF_SUB))
+                if p.get("show_values", True):
+                    ax.text(b.get_x() + b.get_width() / 2.0, v,
+                            p.get("value_fmt", "{:.2f}").format(v),
+                            ha="center", va="bottom", zorder=4,
+                            fontsize=p.get("value_size", 7.5),
+                            fontweight=("bold" if hatched else "normal"),
+                            color=("#1A1A1A" if hatched else "#" + PERF_SUB))
 
             if split is None:
                 bars = ax.bar(
@@ -1461,20 +1470,25 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
                     edgecolor=("white" if (si == best) else "#" + _darken(color)),
                     linewidth=(0.0 if si == best else 0.7),
                     hatch=("///" if si == best else None))
-                for b, v in zip(bars, vals):
-                    ax.text(b.get_x() + b.get_width() / 2.0, v,
-                            p.get("value_fmt", "{:.2f}").format(v),
-                            ha="center", va="bottom", zorder=4,
-                            fontsize=7.5,
-                            fontweight=("bold" if si == best else "normal"),
-                            color=("#1A1A1A" if si == best else "#" + PERF_SUB))
+                if p.get("show_values", True):
+                    for b, v in zip(bars, vals):
+                        ax.text(b.get_x() + b.get_width() / 2.0, v,
+                                p.get("value_fmt", "{:.2f}").format(v),
+                                ha="center", va="bottom", zorder=4,
+                                fontsize=p.get("value_size", 7.5),
+                                fontweight=("bold" if si == best else "normal"),
+                                color=("#1A1A1A" if si == best else "#" + PERF_SUB))
             else:
                 for gi_, v in enumerate(vals):
                     draw_bar(gi_, v)
         if p.get("ref") is not None:
             ax.axhline(p["ref"], ls=(0, (4, 3)), lw=0.9, color="#" + PERF_AXIS, zorder=2)
         ax.set_xticks(xv)
-        ax.set_xticklabels(groups, fontsize=8.8, fontweight="bold")
+        xrot = p.get("xrot", 0)
+        ax.set_xticklabels(
+            groups, fontsize=p.get("label_size", 8.8), fontweight="bold",
+            rotation=xrot, ha=("right" if xrot else "center"),
+            rotation_mode=("anchor" if xrot else None))
         ax.set_ylabel(p.get("ylabel", ""), fontsize=8.8)
         ax.set_title(p.get("title", ""), fontsize=10.0, fontweight="bold", pad=8)
         ax.set_ylim(0, p.get("ymax") or vmax * 1.18)

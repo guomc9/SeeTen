@@ -301,7 +301,28 @@ def main(pptx_path):
     else:
         ok("5b 页已标注选择器不可达")
 
-    # 性能对比页（拆成 3 页）：逐表对照 + 口径标注
+    # 性能对比页（4 页）：统计表对照 + 明细表逐格 + 口径标注
+    import math as _m
+
+    import perf_matrix as pm
+
+    def _gm(xs):
+        xs = [x for x in xs if x is not None and x > 0]
+        return _m.exp(sum(_m.log(x) for x in xs) / len(xs)) if xs else float("nan")
+
+    def _ratio(num, den):
+        return [a / b if (a and b) else None for a, b in zip(num, den)]
+
+    def _idx(lay):
+        return [i for i, c in enumerate(pm.CASES) if c[1] == lay]
+
+    def _split(vals):
+        return [[vals[i] for i in _idx(lay)] for lay in ("BSND", "TND")]
+
+    def _rate(vals, th=0.8):
+        xs = [v for v in vals if v is not None]
+        return sum(1 for v in xs if v >= th) / len(xs) if xs else 0.0
+
     checks_tables, perf_texts = [], []
     for sl in prs.slides:
         for sh in sl.shapes:
@@ -311,7 +332,6 @@ def main(pptx_path):
                 checks_tables.append(sh.table)
                 perf_texts.extend(tc.text for row in sh.table.rows
                                   for tc in row.cells)
-    T = dc.PERF_TIMES
 
     def find_table(header, labels):
         for t in checks_tables:
@@ -322,28 +342,62 @@ def main(pptx_path):
                 return t
         return None
 
-    def fmt(values, spec):
-        return [spec.format(v) for v in values]
-
-    for header, labels, exp_rows in [
-            ("det/nd 开销 (×)", ["本仓库", "opst"],
-             [fmt([a / b for a, b in zip(T["v3-det"], T["v3-nd"])], "{:.2f}"),
-              fmt([a / b for a, b in zip(T["opst-det"], T["opst-nd"])], "{:.2f}")]),
-            ("核时 (μs)", ["本仓库 det", "opst det"],
-             [fmt(T["v3-det"], "{:.1f}"), fmt(T["opst-det"], "{:.1f}")]),
-            ("核时 (μs)", ["本仓库 nd", "opst nd"],
-             [fmt(T["v3-nd"], "{:.1f}"), fmt(T["opst-nd"], "{:.1f}")])]:
-        t = find_table(header, labels)
+    def check_agg(header, rows, fmts, tag):
+        """统计表：3 列（BSND / TND / 全体），值由数据模块按行口径重算。"""
+        t = find_table(header, [r[0] for r in rows])
         if t is None:
-            fail(f"性能页缺表: {header} / {labels}")
-            continue
-        bad = sum(1 for ri, exp in enumerate(exp_rows)
-                  if [t.cell(ri + 1, ci + 1).text.strip()
-                      for ci in range(len(dc.PERF_SHAPES))] != exp)
-        if bad:
-            fail(f"性能页表 {header}{labels}: {bad} 行与数据不符")
-        else:
-            ok(f"性能页表 {header}{labels}: 与数据一致")
+            fail(f"性能页缺统计表: {header} / {[r[0] for r in rows]}")
+            return
+        bad = 0
+        for ri, (label, vals, mode) in enumerate(rows):
+            fn = _rate if mode == "rate" else _gm
+            by = _split(vals)
+            exp = [fmts[ri](fn(x)) for x in by] + [fmts[ri](fn(vals))]
+            got = [t.cell(ri + 1, ci + 1).text.strip() for ci in range(3)]
+            if got != exp:
+                bad += 1
+                fail(f"性能统计表 {header}/{label}: {got} != {exp}")
+        if not bad:
+            ok(f"性能统计表 {header}: 与数据一致（{tag}）")
+
+    pen_ours = _ratio(pm.OURS_DET, pm.OURS_ND)
+    pen_opst = _ratio(pm.OPST_DET, pm.OPST_ND)
+    det_ratio = _ratio(pm.OPST_DET, pm.OURS_DET)
+    nd_ratio = _ratio(pm.OPST_ND, pm.OURS_ND)
+    check_agg("det/nd 开销 (×)",
+              [("ours det/nd 几何平均", pen_ours, "gm"),
+               ("opst det/nd 几何平均", pen_opst, "gm")],
+              [lambda v: f"{v:.2f}"] * 2, "9.1")
+    check_agg("det 对比 (×)",
+              [("opst/ours 几何平均", det_ratio, "gm"),
+               ("达标 (≥0.8×)", det_ratio, "rate")],
+              [lambda v: f"{v:.2f}", lambda v: f"{v:.0%}"], "9.2")
+    check_agg("nd 对比 (×)",
+              [("opst/ours 几何平均", nd_ratio, "gm"),
+               ("达标 (≥0.8×)", nd_ratio, "rate")],
+              [lambda v: f"{v:.2f}", lambda v: f"{v:.0%}"], "9.3")
+
+    # 9.4 明细：4 张表（BSND 11+10 / TND 8+7），逐格核验
+    detail = [t for t in checks_tables
+              if t.cell(0, 0).text.strip() == "核时 (μs)"]
+    blocks = [_idx("BSND")[:11], _idx("BSND")[11:],
+              _idx("TND")[:8], _idx("TND")[8:]]
+    if len(detail) != len(blocks):
+        fail(f"性能明细表数量 {len(detail)} != {len(blocks)}")
+    else:
+        bad = 0
+        for t, idxs in zip(detail, blocks):
+            for ri, ci_ in enumerate(idxs):
+                exp = [pm.OURS_DET[ci_], pm.OURS_ND[ci_],
+                       pm.OPST_DET[ci_], pm.OPST_ND[ci_]]
+                exp_s = ["—" if v is None else f"{v:.1f}" for v in exp]
+                got = [t.cell(ri + 1, c).text.strip() for c in range(1, 5)]
+                if got != exp_s:
+                    bad += 1
+                    fail(f"明细表行 {pm.CASES[ci_][0]}: {got} != {exp_s}")
+        if not bad:
+            ok(f"性能明细表: {sum(len(b) for b in blocks)} 行逐格一致")
+
     blob = " ".join(perf_texts)
     for token in ("非 event record", "msprof", "Task Duration", "det/nd",
                   "opst-det / 本仓库-det", "opst-nd / 本仓库-nd"):

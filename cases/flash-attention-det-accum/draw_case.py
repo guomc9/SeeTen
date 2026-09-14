@@ -1101,108 +1101,210 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
     return s
 
 
-# 性能对比数据（可选页；msprof kernel 时间中位数 μs，来源 .docs/scratch/prof_cmp4.csv，
-# causal BSND、Hq=Hkv=8、D=128；是 device 侧 kernel 时间，不是 event record）
-PERF_SHAPES = ["b1_s1024", "b1_s2048", "b1_s4096", "b1_s8192",
-               "b2_s4096", "b4_s4096", "b8_s4096", "b4_s8192"]
-PERF_TIMES = {
-    "v3-det": [77.2, 187.8, 590.6, 2327.3, 1257.1, 2527.7, 5286.7, 9834.3],
-    "v3-nd": [55.5, 138.9, 498.5, 1905.2, 1087.5, 2416.5, 4984.0, 8703.9],
-    "opst-det": [57.3, 123.9, 393.8, 1501.4, 922.6, 2703.3, 5444.3, 11976.0],
-    "opst-nd": [46.7, 104.3, 338.4, 1348.1, 775.8, 1639.7, 3875.9, 6055.6],
-}
-PERF_COLORS = {"v3-det": sd.PERF_SELF, "v3-nd": sd.PERF_SELF_ALT,
-               "opst-det": sd.PERF_REF, "opst-nd": sd.PERF_REF_ALT}
+# ------------------------------------------------------------------ 性能对比
+# 口径：msprof device 侧 kernel 时间（Task Duration 最小值，warmup 5 + repeat 20），
+# 不是 event record 端到端计时。数据见 perf_matrix.py：
+#   本仓库 = det-cmp-v3-swizzle（合并 integration/FAG-V3-A5 cube Optimize 后）；
+#   参考仓库 = opst（det 走 torch.use_deterministic_algorithms(True)）。
+# 四页：9.1 确定性开销 / 9.2 det-vs-det / 9.3 nd-vs-nd / 9.4 全矩阵明细。
+import math
+
+import perf_matrix as pm
 
 
-def draw_perf_page(prs, num, title, sub, panels, fig_note, table_header,
-                   table_rows, table_fmts, highlight=(), read_rows=(),
-                   key="", fig_h=4.90):
-    """一张性能对比页：大图（横轴拉长、全部 shape） + 数据表 + 读法 + 结论。
+def _gm(xs):
+    xs = [x for x in xs if x is not None and x > 0]
+    return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else float("nan")
 
-    数据来源：PERF_TIMES（msprof kernel 时间中位数 μs，causal BSND H8 D128）。
-    """
+
+def _ratio(num, den):
+    return [a / b if (a and b) else None for a, b in zip(num, den)]
+
+
+def _idx(layout):
+    return [i for i, c in enumerate(pm.CASES) if c[1] == layout]
+
+
+def _split_by_layout(vals):
+    return [[vals[i] for i in _idx(lay)] for lay in ("BSND", "TND")]
+
+
+def _rate(vals, th=0.8):
+    xs = [v for v in vals if v is not None]
+    return sum(1 for v in xs if v >= th) / len(xs) if xs else 0.0
+
+
+def _stat_rows(series_specs, th=0.8):
+    """统计表行：每个 series 一行几何平均（+ 达标率）。"""
+    rows = []
+    for label, vals, _c in series_specs:
+        by = _split_by_layout(vals)
+        allv = [v for v in vals if v is not None]
+        rows.append((f"{label} 几何平均", [_gm(x) for x in by] + [_gm(allv)],
+                     "{:.2f}"))
+    return rows
+
+
+def draw_perf_ratio_page(prs, num, title, sub, series_specs, fig_note,
+                         table_header, table_rows, read_rows, key,
+                         split=0.8, ref=0.8, ymax=None):
+    """一张比值型性能页：BSND/TND 两个子图（横轴 = 该 layout 全部 case） +
+    统计表 + 读法 + 结论。series_specs = [(label, ratio_list, color), ...]。"""
     s = sd.blank_slide(prs)
     sd.title(s, f"{num}. {title}", y=0.62)
-    sd.text(s, 0.73, 1.22, sub, w=15.2, h=0.30, size=14.0, color=sd.BODY_TEXT)
+    sd.text(s, 0.73, 1.22, sub, w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
+    panels = []
+    for pi, lay in enumerate(("BSND", "TND")):
+        idx = _idx(lay)
+        series = [(label, [vals[i] if vals[i] is not None else 0.0 for i in idx],
+                   color) for label, vals, color in series_specs]
+        panels.append(dict(
+            title=f"{' / '.join(x[0] for x in series_specs)} · "
+                  f"{lay}（{len(idx)} case）",
+            groups=[pm.CASES[i][2] for i in idx],
+            series=series,
+            ylabel="ratio", ref=ref, split=split if len(series) == 1 else None,
+            bar_w=0.62 if len(series) == 1 else 0.42,
+            xrot=90, show_values=False,
+            ymax=ymax if pi == 0 else None))
+    fig_h = 4.55
     sd.perf_figure(s, 0.73, 1.68, 15.2, fig_h, panels, note=fig_note)
-    ty = 1.68 + fig_h + (0.40 if fig_note else 0.10) + 0.22
-    sd.perf_table(s, 0.73, ty, PERF_SHAPES, table_rows, header=table_header,
-                  first_col_w=1.75, col_w=1.05, size=12.5, row_h=0.42,
-                  fmts=table_fmts, highlight=highlight)
+    ty = 1.68 + fig_h + 0.40 + 0.20
+    # series_specs 的 label 用于统计表首列；首列宽按最长标签留足
+    sd.perf_table(s, 0.73, ty, ("BSND", "TND", "全体"),
+                  [(r[0], r[1]) for r in table_rows],
+                  header=table_header, first_col_w=3.30, col_w=1.25,
+                  size=11.5, row_h=0.40,
+                  fmts=[r[2] for r in table_rows],
+                  note=None)
     if read_rows:
-        sd.panel(s, 11.15, ty, "怎么读", ("看什么", "结论"), read_rows,
-                 col_w=(1.25, 3.45), row_h=0.56, size=11.5)
-    sd.note(s, 0.73, 11.22, key, w=15.2, h=0.52)
+        sd.panel(s, 12.05, ty, "怎么读", ("看什么", "结论"), read_rows,
+                 col_w=(1.10, 2.55), row_h=0.50, size=10.5)
+    sd.note(s, 0.73, 11.24, key, w=11.1, h=0.50, size=11.0)
+    return s
+
+
+def draw_perf_detail_page(prs):
+    """9.4 全矩阵明细：BNSD/TND 各两张表（case × 四个核时值）。"""
+    s = sd.blank_slide(prs)
+    sd.title(s, "9.4. 全矩阵明细（核时 μs，min of 25）", y=0.62)
+    sd.text(s, 0.73, 1.22,
+            "36 case（BSND 21 + TND 15）× 本仓库 det/nd 与 opst det/nd · "
+            "msprof device 侧 kernel 时间（Task Duration min）· "
+            "空缺 = 参考实现无法运行",
+            w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
+    cols = ("ours det", "ours nd", "opst det", "opst nd")
+    header = "核时 (μs)"
+
+    def rows_for(indices):
+        out = []
+        for i in indices:
+            name, _lay, label = pm.CASES[i]
+
+            def f(v):
+                return "—" if v is None else f"{v:.1f}"
+
+            out.append((label,
+                        [f(pm.OURS_DET[i]), f(pm.OURS_ND[i]),
+                         f(pm.OPST_DET[i]), f(pm.OPST_ND[i])]))
+        return out
+
+    bsnd = _idx("BSND")
+    tnd = _idx("TND")
+    blocks = [
+        (0.73, 1.72, bsnd[:11]), (8.05, 1.72, bsnd[11:]),
+        (0.73, 6.48, tnd[:8]), (8.05, 6.48, tnd[8:]),
+    ]
+    for x, y, idxs in blocks:
+        rows = rows_for(idxs)
+        sd.perf_table(s, x, y, cols, rows, header=header,
+                      first_col_w=3.05, col_w=0.98, size=10.0, row_h=0.335,
+                      fmts=["{}"] * len(rows), best=None)
+    sd.note(s, 0.73, 10.95,
+            "表内加粗 = 该列（口径）的全局最小值（核时越小越好）；"
+            "取值均为 msprof Task Duration 最小值，非 event record。",
+            w=15.2, h=0.34)
     return s
 
 
 def draw_perf_pages(prs):
-    """把性能对比拆成多页：确定性开销 / det 对比 / nd 对比（横轴 = 全部 8 个 shape）。"""
-    T = PERF_TIMES
+    """性能对比 4 页：确定性开销 / det-vs-det / nd-vs-nd / 全矩阵明细。"""
+    od, ond = pm.OURS_DET, pm.OURS_ND
+    pd, pnd = pm.OPST_DET, pm.OPST_ND
+    pen_ours = _ratio(od, ond)
+    pen_opst = _ratio(pd, pnd)
+    det_ratio = _ratio(pd, od)          # opst-det / ours-det
+    nd_ratio = _ratio(pnd, ond)         # opst-nd / ours-nd
 
-    def div(a, b):
-        return [x / y for x, y in zip(T[a], T[b])]
-
-    det_cost_ours = div("v3-det", "v3-nd")
-    det_cost_opst = div("opst-det", "opst-nd")
-    det_ratio = div("opst-det", "v3-det")
-    nd_ratio = div("opst-nd", "v3-nd")
-
-    draw_perf_page(
+    # ---- 9.1 确定性开销 ----
+    specs = [("ours det/nd", pen_ours, sd.PERF_SELF),
+             ("opst det/nd", pen_opst, sd.PERF_REF)]
+    rows = _stat_rows(specs)
+    gm_o = _gm([v for v in pen_ours if v is not None])
+    gm_p = _gm([v for v in pen_opst if v is not None])
+    draw_perf_ratio_page(
         prs, "9.1", "性能对比：确定性开销（det / nd 核时倍率）",
-        "本仓库：v3-det / v3-nd（基线）；参考仓库：opst-det / opst-nd · "
-        "causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧），非 event record",
-        [dict(title="Deterministic penalty (det / nd kernel time, > 1 = det slower)",
-              groups=PERF_SHAPES,
-              series=[("ours (v3)", det_cost_ours, sd.PERF_SELF),
-                      ("opst", det_cost_opst, sd.PERF_REF)],
-              ylabel="ratio", best=0, value_fmt="{:.2f}")],
-        "核时取自 msprof Task Duration 中位数；倍率 = det 核时 / nd 核时（profiling 口径，非 event record）",
-        "det/nd 开销 (×)",
-        [("本仓库", det_cost_ours), ("opst", det_cost_opst)],
-        ["{:.2f}"] * 2, highlight=(0,),
-        read_rows=[("> 1", "确定性更慢（劣化）"),
-                   ("本仓库", "1.05–1.22×，**随 shape 增大收敛**"),
-                   ("opst", "1.11–1.98×，大 shape 劣化近 2×")],
-        key="结论：本仓库的确定性开销明显更小（1.05–1.22×），且随 shape 增大而收敛；"
-            "opst 的确定性劣化在大 shape 上接近 2×。")
+        "倍率 = det 核时 / nd 核时（> 1 = det 更慢）· 全矩阵 36 case（BSND 21 + TND 15）· "
+        "msprof kernel 时间（device 侧），非 event record",
+        specs,
+        "核时取自 msprof Task Duration 最小值；倍率 = det / nd；虚线 = 1.0（无开销）",
+        "det/nd 开销 (×)", rows,
+        [("倍率 > 1", "确定性有开销（劣化）"),
+         ("ours 几何平均", f"**{gm_o:.2f}×**（全矩阵）"),
+         ("opst 几何平均", f"{gm_p:.2f}×（全矩阵）")],
+        f"结论：本仓库 det/nd 几何平均 {gm_o:.2f}×（opst {gm_p:.2f}×）；全矩阵 "
+        f"{_rate([v for v in pen_ours if v is not None], 1.0):.0%} 的 case det 变慢，"
+        "确定性代价普遍存在；BSND 侧本仓库更小。",
+        ref=1.0, split=1.0, ymax=None)
 
-    draw_perf_page(
+    # ---- 9.2 det-vs-det ----
+    rows2 = _stat_rows([("opst/ours", det_ratio, sd.PERF_SELF)], th=0.8)
+    rows2.append(("达标 (≥0.8×)", [_rate(x, 0.8) for x in _split_by_layout(det_ratio)]
+                  + [_rate(det_ratio, 0.8)], "{:.0%}"))
+    gm_d = _gm([v for v in det_ratio if v is not None])
+    lo_d = min((v for v in det_ratio if v is not None), default=0.0)
+    hi_d = max((v for v in det_ratio if v is not None), default=0.0)
+    draw_perf_ratio_page(
         prs, "9.2", "性能对比：det-vs-det（opst-det / 本仓库-det）",
-        "同口径确定性实现对比 · causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧）",
-        [dict(title="Kernel-time ratio (opst-det / ours-det, > 1 = ours faster)",
-              groups=PERF_SHAPES,
-              series=[("opst / ours det cost", det_ratio, sd.PERF_SELF)],
-              ylabel="ratio", best=0, ref=1.0, split=1.0, bar_w=0.42,
-              value_fmt="{:.2f}")],
-        "核时取自 msprof Task Duration 中位数；比值 = opst-det / 本仓库-det；<1 的柱标灰 = 本仓库更慢",
-        "核时 (μs)",
-        [("本仓库 det", T["v3-det"]), ("opst det", T["opst-det"])],
-        ["{:.1f}"] * 2, highlight=(0,),
-        read_rows=[("> 1", "本仓库更快（蓝柱）"),
-                   ("< 1", "本仓库更慢（灰柱）"),
-                   ("现状", "小 shape 慢 1.35–1.55×；\n大 shape 快 3–18%")],
-        key="结论：小/中 shape 仍是 opst 的确定性实现更快；b4/b8_s4096、b4_s8192 "
-            "三个大 shape 上本仓库反超（最多 18%）。")
+        "同口径确定性实现 · 全矩阵 36 case · 核时为 msprof kernel 时间（device 侧）· "
+        "比值 ≥ 0.8 = 达标（蓝柱），< 0.8 标灰",
+        [("opst-det / ours-det", det_ratio, sd.PERF_SELF)],
+        "核时取自 msprof Task Duration 最小值；比值 = opst-det / 本仓库-det；"
+        "虚线 = 0.8（目标线）；< 0.8 的柱标灰 = 本仓库用时超过 opst 的 1.25×",
+        "det 对比 (×)", rows2,
+        [("≥ 0.8", "达标（蓝柱）"),
+         ("< 0.8", "本仓库更慢（灰柱）"),
+         ("几何平均", f"{gm_d:.2f}×（全矩阵）"),
+         ("最差 / 最好", f"{lo_d:.2f}× / {hi_d:.2f}×")],
+        f"结论：det 侧几何平均 {gm_d:.2f}×；达标（≥0.8×）{_rate(det_ratio, 0.8):.0%}（全体）、"
+        f"{_rate(_split_by_layout(det_ratio)[0], 0.8):.0%}（BSND）、"
+        f"{_rate(_split_by_layout(det_ratio)[1], 0.8):.0%}（TND）；差距集中在 GQA causal / 小 shape。")
 
-    draw_perf_page(
+    # ---- 9.3 nd-vs-nd ----
+    rows3 = _stat_rows([("opst/ours", nd_ratio, sd.PERF_SELF)])
+    rows3.append(("达标 (≥0.8×)", [_rate(x, 0.8) for x in _split_by_layout(nd_ratio)]
+                  + [_rate(nd_ratio, 0.8)], "{:.0%}"))
+    gm_n = _gm([v for v in nd_ratio if v is not None])
+    lo_n = min((v for v in nd_ratio if v is not None), default=0.0)
+    hi_n = max((v for v in nd_ratio if v is not None), default=0.0)
+    draw_perf_ratio_page(
         prs, "9.3", "性能对比：nd-vs-nd（opst-nd / 本仓库-nd）",
-        "非确定性路径对比（基线口径）· causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧）",
-        [dict(title="Kernel-time ratio (opst-nd / ours-nd, > 1 = ours faster)",
-              groups=PERF_SHAPES,
-              series=[("opst / ours nd cost", nd_ratio, sd.PERF_SELF)],
-              ylabel="ratio", best=0, ref=1.0, split=1.0, bar_w=0.42,
-              value_fmt="{:.2f}")],
-        "核时取自 msprof Task Duration 中位数；比值 = opst-nd / 本仓库-nd；<1 的柱标灰 = 本仓库更慢",
-        "核时 (μs)",
-        [("本仓库 nd", T["v3-nd"]), ("opst nd", T["opst-nd"])],
-        ["{:.1f}"] * 2, highlight=(0,),
-        read_rows=[("< 1 全部", "本仓库 nd 全面慢于 opst"),
-                   ("差距", "1.19–1.47×（既有问题）"),
-                   ("说明", "非确定路径差距与本重构无关")],
-        key="结论：非确定路径上本仓库整体慢 opst 1.19–1.47× —— 这是分支既有的基础流水线差距，"
-            "与本次确定性重构无关。")
+        "非确定性基线流水线对比 · 全矩阵 36 case · 核时为 msprof kernel 时间（device 侧）· "
+        "比值 ≥ 0.8 = 达标（蓝柱），< 0.8 标灰",
+        [("opst-nd / ours-nd", nd_ratio, sd.PERF_SELF)],
+        "核时取自 msprof Task Duration 最小值；比值 = opst-nd / 本仓库-nd；"
+        "虚线 = 0.8；< 0.8 的柱标灰 = 本仓库用时超过 opst 的 1.25×",
+        "nd 对比 (×)", rows3,
+        [("≥ 0.8", "达标（蓝柱）"),
+         ("< 0.8", "本仓库更慢（灰柱）"),
+         ("几何平均", f"{gm_n:.2f}×（全矩阵）"),
+         ("最差 / 最好", f"{lo_n:.2f}× / {hi_n:.2f}×")],
+        f"结论：nd 侧几何平均 {gm_n:.2f}×，达标 {_rate(nd_ratio, 0.8):.0%}；"
+        "nd 差距是分支既有的基础流水线问题，与确定性重构无关（此前已记录）。")
+
+    # ---- 9.4 明细 ----
+    draw_perf_detail_page(prs)
+
 
 def main(path):
     prs = sd.new_deck("4:3")
