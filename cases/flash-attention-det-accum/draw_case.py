@@ -1178,50 +1178,52 @@ def _stat_rows(series_specs):
     return rows
 
 
-def draw_perf_ratio_page(prs, num, title, sub, series_specs, fig_note,
+def draw_perf_ratio_page(prs, num, title, sub, size, series_specs, fig_note,
                          table_header, table_rows, read_rows, key,
                          split=0.8, ref=0.8):
-    """一张比值型性能页：2x3 子图（BSND/TND x 小/中/大）+ 6 列统计表 + 结论。"""
+    """一张比值型性能页：BSND/TND 两幅全宽子图（该 size 组的全部 case）+
+    2 列统计表 + 结论。"""
     s = sd.blank_slide(prs)
     sd.title(s, f"{num}. {title}", y=0.62)
     sd.text(s, 0.73, 1.22, sub, w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
     panels = []
-    for gi, (lay, sz) in enumerate(
-            [(lay, sz) for lay in ("BSND", "TND") for sz in SIZES]):
-        idx = _group_idx(lay, sz)
+    for lay in ("BSND", "TND"):
+        idx = _group_idx(lay, size)
         series = [(label, [vals[i] if vals[i] is not None else 0.0 for i in idx],
                    color) for label, vals, color in series_specs]
         panels.append(dict(
-            title=f"{lay} {SZ_EN[sz]} ({len(idx)})",
-            groups=[pm.CASES[i][2] for i in idx],
-            series=series,
-            ylabel="ratio", ref=ref,
+            title=f"{lay} {SZ_EN[size]} ({len(idx)})",
+            groups=[pm.SHORT[i] for i in idx],
+            series=series, ylabel="ratio", ref=ref,
             split=split if len(series) == 1 else None,
-            bar_w=0.62 if len(series) == 1 else 0.40,
-            xrot=90, show_values=False,
-            legend=(gi % 3 == 0)))
-    fig_h = 5.85
-    sd.perf_figure(s, 0.73, 1.66, 15.2, fig_h, panels, note=fig_note, ncols=3)
-    ty = 1.66 + fig_h + 0.40 + 0.16
-    nrows = len(table_rows) + 1
-    sd.perf_table(s, 0.73, ty, GROUP_COLS,
-                  [(r[0], r[1]) for r in table_rows],
-                  header=table_header, first_col_w=2.90, col_w=1.06,
-                  size=11.0, row_h=0.42,
-                  fmts=[r[2] for r in table_rows],
-                  best=None, note=None)
+            bar_w=0.60 if len(series) == 1 else 0.40,
+            xrot=30, show_values=False, legend=True,
+            value_size=7.0, label_size=8.4))
+    fig_bottom = sd.perf_figure(s, 0.73, 1.64, 15.2, 6.05, panels,
+                                note=fig_note)
+    ty = fig_bottom + 0.14
+    tbl_bottom = sd.perf_table(s, 0.73, ty, ("BSND", "TND"),
+                               [(r[0], r[1]) for r in table_rows],
+                               header=f"{table_header} · {size}",
+                               first_col_w=3.20, col_w=1.55,
+                               size=11.5, row_h=0.42,
+                               fmts=[r[2] for r in table_rows], best=None,
+                               note=None)
+    pnl_bottom = ty
     if read_rows:
-        sd.panel(s, 11.35, ty, "怎么读", ("看什么", "结论"), read_rows,
-                 col_w=(1.45, 2.00), row_h=0.50, size=10.5)
-    sd.note(s, 0.73, min(ty + nrows * 0.42 + 0.30, 10.95), key,
-            w=15.2, h=0.62, size=11.0)
+        pnl_bottom = sd.panel(s, 7.55, ty, "怎么读", ("看什么", "结论"),
+                              read_rows, col_w=(1.35, 6.10), row_h=0.50,
+                              size=10.5)
+    # 结论放在统计表与「怎么读」面板之下（取两者实际底边）
+    sd.note(s, 0.73, min(max(tbl_bottom, pnl_bottom) + 0.12, 11.16), key,
+            w=15.2, h=0.60, size=11.5)
     return s
 
 
 def draw_perf_detail_page(prs):
     """9.4 全矩阵明细：BNSD/TND 各两张表（case × 四个核时值）。"""
     s = sd.blank_slide(prs)
-    sd.title(s, "9.4. 全矩阵明细（核时 μs，min of 25）", y=0.62)
+    sd.title(s, "9.10. 全矩阵明细（核时 μs，min of 25）", y=0.62)
     sd.text(s, 0.73, 1.22,
             "36 case（BSND 21 + TND 15）× 本仓库 det/nd 与 opst det/nd · "
             "msprof device 侧 kernel 时间（Task Duration min）· "
@@ -1262,10 +1264,8 @@ def draw_perf_detail_page(prs):
 
 
 def draw_perf_pages(prs):
-    """性能对比 4 页：确定性开销 / det-vs-det / nd-vs-nd / 全矩阵明细。
-
-    每页横轴 = BSND/TND x 小/中/大 六个 size 组（表格列同口径），
-    图内文字全 ASCII（matplotlib 无 CJK 字体，全角括号会乱码）。
+    """性能对比 10 页：确定性开销 / det-vs-det / nd-vs-nd 各按 小/中/大 分页 +
+    全矩阵明细页。每页一幅 BSND、一幅 TND（该 size 组的全部 case，短标签）。
     """
     od, ond = pm.OURS_DET, pm.OURS_ND
     pd, pnd = pm.OPST_DET, pm.OPST_ND
@@ -1274,79 +1274,103 @@ def draw_perf_pages(prs):
     det_ratio = _ratio(pd, od)          # opst-det / ours-det
     nd_ratio = _ratio(pnd, ond)         # opst-nd / ours-nd
 
-    def rows_gm(specs, extra=()):
-        return _stat_rows(specs) + list(extra)
+    def gvals(vals, lay, sz):
+        return _group_vals(vals, lay, sz)
 
-    # ---- 9.1 确定性开销 ----
-    specs = [("ours det/nd", pen_ours, sd.PERF_SELF),
-             ("opst det/nd", pen_opst, sd.PERF_REF)]
-    rows = rows_gm(specs, [
-        ("ours 最差组",
-         [_extreme(_group_vals(pen_ours, lay, sz), "max")
-          for lay in ("BSND", "TND") for sz in SIZES], "{:.2f}")])
-    gm_o = _gm([v for v in pen_ours if v is not None])
-    gm_p = _gm([v for v in pen_opst if v is not None])
-    draw_perf_ratio_page(
-        prs, "9.1", "性能对比：确定性开销（det / nd 核时倍率）",
-        "倍率 = det 核时 / nd 核时（> 1 = det 更慢）· 36 case 按 BSND/TND x 小/中/大 分组 · "
-        "msprof kernel 时间（device 侧），非 event record",
-        specs,
-        "核时取自 msprof Task Duration 最小值；倍率 = det / nd；虚线 = 1.0（无开销）；"
-        "图内文字为全 ASCII（matplotlib 无 CJK 字体）",
-        "det/nd 开销 (×)", rows,
-        [("倍率 > 1", "确定性有开销"),
-         ("ours / opst", f"{gm_o:.2f}× / {gm_p:.2f}×")],
-        f"结论：本仓库 det/nd 几何平均 {gm_o:.2f}×，opst {gm_p:.2f}× —— 整体更小；"
-        f"TND 侧差距最大（opst 大 shape 接近 2×），BSND 大 shape 两边相当。",
-        ref=1.0, split=1.0)
+    def gm_pair(vals, sz):
+        return [_gm(gvals(vals, "BSND", sz)), _gm(gvals(vals, "TND", sz))]
 
-    # ---- 9.2 det-vs-det ----
-    rows = rows_gm([("opst/ours", det_ratio, sd.PERF_SELF)], [
-        ("达标 (≥0.8×)",
-         [_rate(_group_vals(det_ratio, lay, sz), 0.8)
-          for lay in ("BSND", "TND") for sz in SIZES], "{:.0%}"),
-        ("最差（组内 min）",
-         [_extreme(_group_vals(det_ratio, lay, sz), "min")
-          for lay in ("BSND", "TND") for sz in SIZES], "{:.2f}")])
-    gm_d = _gm([v for v in det_ratio if v is not None])
-    draw_perf_ratio_page(
-        prs, "9.2", "性能对比：det-vs-det（opst-det / 本仓库-det）",
-        "同口径确定性实现 · 36 case 分组同 9.1 · 核时为 msprof kernel 时间（device 侧）· "
-        "比值 ≥ 0.8 = 达标（蓝柱），< 0.8 标灰",
-        [("opst-det / ours-det", det_ratio, sd.PERF_SELF)],
-        "核时取自 msprof Task Duration 最小值；比值 = opst-det / 本仓库-det；"
-        "虚线 = 0.8 目标线；< 0.8 的柱标灰；图内文字为全 ASCII",
-        "det 对比 (×)", rows,
-        [("小 shape", "明显落后（0.4–0.7×）"),
-         ("大 shape", "基本追平（≈1.0×）"),
-         ("几何平均", f"{gm_d:.2f}×（全体）")],
-        f"结论：det 侧几何平均 {gm_d:.2f}×。小 shape 差距最大（固定开销占比高），"
-        "大 shape 已追平；GQA causal 是 det 侧最大的单项缺口。")
+    def rate_pair(vals, sz):
+        return [_rate(gvals(vals, "BSND", sz), 0.8),
+                _rate(gvals(vals, "TND", sz), 0.8)]
 
-    # ---- 9.3 nd-vs-nd ----
-    rows = rows_gm([("opst/ours", nd_ratio, sd.PERF_SELF)], [
-        ("达标 (≥0.8×)",
-         [_rate(_group_vals(nd_ratio, lay, sz), 0.8)
-          for lay in ("BSND", "TND") for sz in SIZES], "{:.0%}"),
-        ("最差（组内 min）",
-         [_extreme(_group_vals(nd_ratio, lay, sz), "min")
-          for lay in ("BSND", "TND") for sz in SIZES], "{:.2f}")])
-    gm_n = _gm([v for v in nd_ratio if v is not None])
-    draw_perf_ratio_page(
-        prs, "9.3", "性能对比：nd-vs-nd（opst-nd / 本仓库-nd）",
-        "非确定性基线流水线 · 36 case 分组同 9.1 · 核时为 msprof kernel 时间（device 侧）· "
-        "比值 ≥ 0.8 = 达标（蓝柱），< 0.8 标灰",
-        [("opst-nd / ours-nd", nd_ratio, sd.PERF_SELF)],
-        "核时取自 msprof Task Duration 最小值；比值 = opst-nd / 本仓库-nd；"
-        "虚线 = 0.8 目标线；< 0.8 的柱标灰；图内文字为全 ASCII",
-        "nd 对比 (×)", rows,
-        [("小 shape", "差距最大（10–30µs）"),
-         ("中/大 shape", "1.1–1.5×（既有问题）"),
-         ("几何平均", f"{gm_n:.2f}×（全体）")],
-        f"结论：nd 侧几何平均 {gm_n:.2f}×；差距是分支既有的基础流水线问题，"
-        "与确定性重构无关（合并目标 cube Optimize 后部分 mid shape 还略有变慢）。")
+    def min_pair(vals, sz):
+        return [_extreme(gvals(vals, "BSND", sz), "min"),
+                _extreme(gvals(vals, "TND", sz), "min")]
 
-    # ---- 9.4 明细 ----
+    def max_pair(vals, sz):
+        return [_extreme(gvals(vals, "BSND", sz), "max"),
+                _extreme(gvals(vals, "TND", sz), "max")]
+
+    f2, fp = "{:.2f}", "{:.0%}"
+
+    # ---- 确定性开销（9.1-9.3，按 size 分页） ----
+    for i, sz in enumerate(SIZES):
+        num = f"9.{i+1}"
+        draw_perf_ratio_page(
+            prs, num, f"性能对比：确定性开销（{sz} shape）",
+            f"倍率 = det 核时 / nd 核时（> 1 = det 更慢）· {sz} shape 组 · "
+            "msprof kernel 时间（device 侧），非 event record",
+            sz,
+            [("ours det/nd", pen_ours, sd.PERF_SELF),
+             ("opst det/nd", pen_opst, sd.PERF_REF)],
+            "核时取自 msprof Task Duration 最小值；倍率 = det / nd；虚线 = 1.0（无开销）",
+            "det/nd 开销 (×)",
+            [("ours det/nd 几何平均", gm_pair(pen_ours, sz), f2),
+             ("opst det/nd 几何平均", gm_pair(pen_opst, sz), f2),
+             ("ours 最差组", max_pair(pen_ours, sz), f2)],
+            [("倍率 > 1", "确定性有开销"),
+             ("BSND / TND", f"{_gm(gvals(pen_ours, 'BSND', sz)):.2f}× / "
+                            f"{_gm(gvals(pen_ours, 'TND', sz)):.2f}×")],
+            f"结论：{sz} shape 上本仓库 det/nd = "
+            f"{_gm(gvals(pen_ours, 'BSND', sz)):.2f}×（BSND）/ "
+            f"{_gm(gvals(pen_ours, 'TND', sz)):.2f}×（TND）；opst 为 "
+            f"{_gm(gvals(pen_opst, 'BSND', sz)):.2f}× / "
+            f"{_gm(gvals(pen_opst, 'TND', sz)):.2f}×。",
+            ref=1.0, split=1.0)
+
+    # ---- det-vs-det（9.4-9.6） ----
+    for i, sz in enumerate(SIZES):
+        num = f"9.{i+4}"
+        draw_perf_ratio_page(
+            prs, num, f"性能对比：det-vs-det（{sz} shape）",
+            f"比值 = opst-det / 本仓库-det（≥ 0.8 = 达标）· {sz} shape 组 · "
+            "核时为 msprof kernel 时间（device 侧）",
+            sz,
+            [("opst-det / ours-det", det_ratio, sd.PERF_SELF)],
+            "核时取自 msprof Task Duration 最小值；虚线 = 0.8 目标线；"
+            "< 0.8 的柱标灰 = 本仓库用时超过 opst 的 1.25×",
+            "det 对比 (×)",
+            [("opst/ours 几何平均", gm_pair(det_ratio, sz), f2),
+             ("达标 (≥0.8×)", rate_pair(det_ratio, sz), fp),
+             ("最差（组内 min）", min_pair(det_ratio, sz), f2)],
+            [("≥ 0.8", "达标（蓝柱）"),
+             ("BSND / TND", f"{_gm(gvals(det_ratio, 'BSND', sz)):.2f}× / "
+                            f"{_gm(gvals(det_ratio, 'TND', sz)):.2f}×"),
+             ("达标率", f"{_rate(gvals(det_ratio, 'BSND', sz), 0.8):.0%} / "
+                        f"{_rate(gvals(det_ratio, 'TND', sz), 0.8):.0%}")],
+            f"结论：{sz} shape 的 det 比值 "
+            f"{_gm(gvals(det_ratio, 'BSND', sz)):.2f}×（BSND）/ "
+            f"{_gm(gvals(det_ratio, 'TND', sz)):.2f}×（TND）；"
+            f"达标 {_rate(gvals(det_ratio, 'BSND', sz), 0.8):.0%} / "
+            f"{_rate(gvals(det_ratio, 'TND', sz), 0.8):.0%}。")
+
+    # ---- nd-vs-nd（9.7-9.9） ----
+    for i, sz in enumerate(SIZES):
+        num = f"9.{i+7}"
+        draw_perf_ratio_page(
+            prs, num, f"性能对比：nd-vs-nd（{sz} shape）",
+            f"比值 = opst-nd / 本仓库-nd（≥ 0.8 = 达标）· {sz} shape 组 · "
+            "核时为 msprof kernel 时间（device 侧）",
+            sz,
+            [("opst-nd / ours-nd", nd_ratio, sd.PERF_SELF)],
+            "核时取自 msprof Task Duration 最小值；虚线 = 0.8 目标线；"
+            "< 0.8 的柱标灰；nd 差距是既有主流水问题，与确定性重构无关",
+            "nd 对比 (×)",
+            [("opst/ours 几何平均", gm_pair(nd_ratio, sz), f2),
+             ("达标 (≥0.8×)", rate_pair(nd_ratio, sz), fp),
+             ("最差（组内 min）", min_pair(nd_ratio, sz), f2)],
+            [("≥ 0.8", "达标（蓝柱）"),
+             ("BSND / TND", f"{_gm(gvals(nd_ratio, 'BSND', sz)):.2f}× / "
+                            f"{_gm(gvals(nd_ratio, 'TND', sz)):.2f}×"),
+             ("达标率", f"{_rate(gvals(nd_ratio, 'BSND', sz), 0.8):.0%} / "
+                        f"{_rate(gvals(nd_ratio, 'TND', sz), 0.8):.0%}")],
+            f"结论：{sz} shape 的 nd 比值 "
+            f"{_gm(gvals(nd_ratio, 'BSND', sz)):.2f}×（BSND）/ "
+            f"{_gm(gvals(nd_ratio, 'TND', sz)):.2f}×（TND）；"
+            "差距来自既有主流水，与确定性重构无关。")
+
+    # ---- 9.10 明细 ----
     draw_perf_detail_page(prs)
 
 

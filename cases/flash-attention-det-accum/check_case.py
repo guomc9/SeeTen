@@ -301,7 +301,7 @@ def main(pptx_path):
     else:
         ok("5b 页已标注选择器不可达")
 
-    # 性能对比页（4 页）：6 列分组统计表 + 明细表逐格 + 口径标注
+    # 性能对比页（10 页）：按 size 分页的 2 列统计表 + 明细表逐格 + 口径标注
     import math as _m
 
     import perf_matrix as pm
@@ -348,8 +348,8 @@ def main(pptx_path):
                 return t
         return None
 
-    def check_agg(header, rows, fmts, tag):
-        """6 列分组统计表：BSND/TND x 小/中/大，按行口径由数据模块重算。"""
+    def check_page(header, rows, fmts, tag):
+        """2 列统计表（BSND / TND），按行口径由数据模块重算。"""
         t = find_table(header, [r[0] for r in rows])
         if t is None:
             fail(f"性能页缺统计表: {header} / {[r[0] for r in rows]}")
@@ -361,8 +361,8 @@ def main(pptx_path):
         for ri, (label, vals, mode) in enumerate(rows):
             fn = fn_of[mode]
             exp = [fmts[ri](fn(_gvals(vals, lay, sz)))
-                   for lay in ("BSND", "TND") for sz in SIZES]
-            got = [t.cell(ri + 1, ci + 1).text.strip() for ci in range(6)]
+                   for lay in ("BSND", "TND")]
+            got = [t.cell(ri + 1, ci + 1).text.strip() for ci in range(2)]
             if got != exp:
                 bad += 1
                 fail(f"性能统计表 {header}/{label}: {got} != {exp}")
@@ -375,20 +375,29 @@ def main(pptx_path):
     nd_ratio = _ratio(pm.OPST_ND, pm.OURS_ND)
     f2 = lambda v: f"{v:.2f}"
     fp = lambda v: f"{v:.0%}"
-    check_agg("det/nd 开销 (×)",
-              [("ours det/nd 几何平均", pen_ours, "gm"),
-               ("opst det/nd 几何平均", pen_opst, "gm"),
-               ("ours 最差组", pen_ours, "max")],
-              [f2, f2, f2], "9.1")
-    for header, ratio, tag in (("det 对比 (×)", det_ratio, "9.2"),
-                               ("nd 对比 (×)", nd_ratio, "9.3")):
-        check_agg(header,
-                  [("opst/ours 几何平均", ratio, "gm"),
-                   ("达标 (≥0.8×)", ratio, "rate"),
-                   ("最差（组内 min）", ratio, "min")],
-                  [f2, fp, f2], tag)
+    for i, sz in enumerate(SIZES):
+        num = f"9.{i+1}"
+        check_page(f"det/nd 开销 (×) · {sz}",
+                   [("ours det/nd 几何平均", pen_ours, "gm"),
+                    ("opst det/nd 几何平均", pen_opst, "gm"),
+                    ("ours 最差组", pen_ours, "max")],
+                   [f2, f2, f2], num)
+    for i, sz in enumerate(SIZES):
+        num = f"9.{i+4}"
+        check_page(f"det 对比 (×) · {sz}",
+                   [("opst/ours 几何平均", det_ratio, "gm"),
+                    ("达标 (≥0.8×)", det_ratio, "rate"),
+                    ("最差（组内 min）", det_ratio, "min")],
+                   [f2, fp, f2], num)
+    for i, sz in enumerate(SIZES):
+        num = f"9.{i+7}"
+        check_page(f"nd 对比 (×) · {sz}",
+                   [("opst/ours 几何平均", nd_ratio, "gm"),
+                    ("达标 (≥0.8×)", nd_ratio, "rate"),
+                    ("最差（组内 min）", nd_ratio, "min")],
+                   [f2, fp, f2], num)
 
-    # 9.4 明细：4 张表（BSND 11+10 / TND 8+7），逐格核验
+    # 9.10 明细：4 张表（BSND 11+10 / TND 8+7），逐格核验
     detail = [t for t in checks_tables
               if t.cell(0, 0).text.strip() == "核时 (μs)"]
     bsnd = [i for i, c in enumerate(pm.CASES) if c[1] == "BSND"]
