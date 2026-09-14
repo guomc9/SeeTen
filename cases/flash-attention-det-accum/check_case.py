@@ -503,7 +503,7 @@ def main(pptx_path):
     check_data_table(pf.BSND_ROWS, "10.1 BSND profiling 表")
     check_data_table(pf.TND_ROWS, "10.2 TND profiling 表")
 
-    t = find_tables(("观察", "证据（10.1 / 10.2 表内数字，µs）", "判断", "行动"))
+    t = find_tables(("观察", "证据（10.1 / 10.2 数据 + 实测 min-of-25）", "判断", "行动"))
     if t:
         ok(f"10.3 结论表: {len(t[0].rows) - 1} 条观察")
     else:
