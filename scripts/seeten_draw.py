@@ -1391,9 +1391,11 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
     """用 matplotlib 渲染性能对比图（推荐），以 PNG 贴进页面。
 
     panels : [dict(title=..., groups=[...], series=[(标签, [值, ...][, 颜色]) ...],
-                   ylabel=..., value_fmt="{:.2f}", best=0, ref=None), ...]
+                   ylabel=..., value_fmt="{:.2f}", best=0, ref=None,
+                   split=None, split_lo=None), ...]
              —— 每个 dict 一个子图；best = 用斜纹加粗强调的系列号；
-             ref = 参考虚线值（如 1.0）。
+             ref = 参考虚线值（如 1.0）；split = 按阈值逐柱上色（≥split 主色、
+             否则 split_lo，默认灰）—— 用于"比值 < 1 标灰"这类好坏分侧。
     font   : matplotlib 字体族。缺省 DejaVu Sans —— 没有 CJK 字体时请把图内文字写成
              英文，中文说明留在页面文字 / 表格里。
     返回底边 y（含 note）。依赖 matplotlib（可选依赖；缺了请退回 perf_bars）。
@@ -1419,24 +1421,54 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
         best = p.get("best", 0)
         xv = list(range(n_g))
         vmax = 0.0
+        split = p.get("split")
         for si, s in enumerate(series):
             label, vals = s[0], s[1]
             color = s[2] if len(s) > 2 else (
                 PERF_SELF, PERF_SELF_ALT, PERF_REF, PERF_REF_ALT)[si % 4]
             off = (si - (n_s - 1) / 2.0) * width
-            hatched = (si == best)
-            bars = ax.bar(
-                [v + off for v in xv], vals, width * 0.92, label=label,
-                color=("#" + color), zorder=3,
-                edgecolor=("white" if hatched else "#" + _darken(color)),
-                linewidth=(0.0 if hatched else 0.7), hatch=("///" if hatched else None))
             vmax = max(vmax, max(vals))
-            for b, v in zip(bars, vals):
+
+            # split 模式下图例挂在"代表色"的柱子上（优先高侧蓝柱）
+            label_gi = 0
+            if split is not None:
+                label_gi = next((i for i, v in enumerate(vals) if v >= split), 0)
+
+            def draw_bar(gi_, v):
+                # split 不为空时按阈值逐柱上色：>= split 用主色（斜纹），
+                # 否则用 split_lo（默认灰）—— 一眼看出"好/差"两侧
+                hi = (split is None) or (v >= split)
+                col = color if hi else p.get("split_lo", PERF_REF)
+                hatched = (si == best) and hi
+                b = ax.bar([xv[gi_] + off], [v], width * 0.92,
+                           color="#" + col, zorder=3,
+                           edgecolor=("white" if hatched else "#" + _darken(col)),
+                           linewidth=(0.0 if hatched else 0.7),
+                           hatch=("///" if hatched else None),
+                           label=label if gi_ == label_gi else None)[0]
                 ax.text(b.get_x() + b.get_width() / 2.0, v,
                         p.get("value_fmt", "{:.2f}").format(v),
                         ha="center", va="bottom", zorder=4,
                         fontsize=7.5, fontweight=("bold" if hatched else "normal"),
                         color=("#1A1A1A" if hatched else "#" + PERF_SUB))
+
+            if split is None:
+                bars = ax.bar(
+                    [v + off for v in xv], vals, width * 0.92, label=label,
+                    color=("#" + color), zorder=3,
+                    edgecolor=("white" if (si == best) else "#" + _darken(color)),
+                    linewidth=(0.0 if si == best else 0.7),
+                    hatch=("///" if si == best else None))
+                for b, v in zip(bars, vals):
+                    ax.text(b.get_x() + b.get_width() / 2.0, v,
+                            p.get("value_fmt", "{:.2f}").format(v),
+                            ha="center", va="bottom", zorder=4,
+                            fontsize=7.5,
+                            fontweight=("bold" if si == best else "normal"),
+                            color=("#1A1A1A" if si == best else "#" + PERF_SUB))
+            else:
+                for gi_, v in enumerate(vals):
+                    draw_bar(gi_, v)
         if p.get("ref") is not None:
             ax.axhline(p["ref"], ls=(0, (4, 3)), lw=0.9, color="#" + PERF_AXIS, zorder=2)
         ax.set_xticks(xv)

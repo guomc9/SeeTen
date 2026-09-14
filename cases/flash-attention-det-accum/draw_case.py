@@ -1136,15 +1136,15 @@ def draw_perf_page(prs):
 
     # 上：matplotlib 渲染的两张对比图（贴图，比原生柱状图精细）
     panels = [
-        dict(title="Determinism cost (det / nd kernel time, >1 = det slower)",
+        dict(title="Deterministic penalty (det / nd kernel time, > 1 = det slower)",
              groups=rep,
              series=[("ours (v4)", ratio("v4-det", "v4-nd"), sd.PERF_SELF),
                      ("opst", ratio("opst-det", "opst-nd"), sd.PERF_REF)],
              ylabel="ratio", best=0, value_fmt="{:.2f}"),
-        dict(title="Det vs det (opst-det / ours-det kernel time, >1 = ours faster)",
+        dict(title="Kernel-time ratio (opst-det / ours-det, > 1 = ours faster)",
              groups=rep,
              series=[("ours v4-det", ratio("opst-det", "v4-det"), sd.PERF_SELF)],
-             ylabel="ratio", best=0, ref=1.0, value_fmt="{:.2f}"),
+             ylabel="ratio", best=0, ref=1.0, split=1.0, value_fmt="{:.2f}"),
     ]
     sd.perf_figure(s, 0.73, 1.68, 15.2, 3.85, panels,
                    note="核时取自 msprof Task Duration 中位数；倍率由核时相除得到"
@@ -1167,10 +1167,7 @@ def draw_perf_page(prs):
                   first_col_w=2.10, col_w=1.02, size=12.5, row_h=0.40,
                   fmts=["{:.1f}"] * 4 + ["{:.2f}"] * 3,
                   best_groups=[[0, 2], [1, 3]],      # det 组 / nd 组 各自标最优
-                  highlight=(0, 1),
-                  note="profiling 核时（msprof Task Duration 中位数，device 侧），"
-                       "非 event record 端到端计时；加粗 = deterministic / "
-                       "nondeterministic 两组各自的最优")
+                  highlight=(0, 1), note="")
     # 右栏：三个对比怎么读
     sd.panel(s, 11.30, 6.15, "三个对比怎么读", ("对比", "结论"), [
         ("det vs det", "opst-det / 本仓库-det：大 shape **>1**\n（本仓库更快），小 shape <1"),
@@ -1179,8 +1176,8 @@ def draw_perf_page(prs):
     ], col_w=(1.50, 3.20), row_h=0.62, size=11.5)
     sd.note(s, 0.73, 11.15,
             "结论：确定性 BN2S2 的开销随 shape 增大而收敛（大 shape 核时反超 opst、"
-            "确定性损失也更小）；小 shape 仍是 opst 更快。非确定路径差距是分支既有问题，"
-            "与本重构无关。",
+            "确定性损失也更小）；小 shape 仍是 opst 更快；表格加粗 = det / nd 两组"
+            "各自列内最优。",
             w=15.2, h=0.52)
     return s
 

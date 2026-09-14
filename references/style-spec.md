@@ -297,6 +297,10 @@ sd.perf_figure(s, 0.73, 1.68, 15.2, 3.85, [
 ], note="核时取自 msprof Task Duration 中位数（profiling 口径，非 event record）")
 ```
 
+> 比值类对比图可以给面板加 `split=1.0`：≥1 的柱子保持主色（如蓝斜纹）、
+> <1 的柱子标灰，好坏两侧一眼可辨；标题里写清是谁比谁（如
+> `Kernel-time ratio (opst-det / ours-det, > 1 = ours faster)`）。
+
 > 图内文字默认 DejaVu Sans（无 CJK 字形）：请把图内标题/标签写成英文，
 > 中文说明放在页面文字和表格里；要用中文图注就给 `perf_figure(font="Noto Sans SC")`
 > 并确保环境装了该字体。
