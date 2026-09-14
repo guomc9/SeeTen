@@ -35,6 +35,7 @@ TITLE_TEXT = "1F2329"
 BODY_TEXT = "333333"
 STRONG_TEXT = "000000"
 ON_BLOCK = "FFFFFF"
+ZEBRA_FILL = "F7F8FA"     # 全白表格的隔行底色：白/灰相间，行与行更分明
 
 GROUP0, GROUP1, GROUP2 = "3370FF", "82A7FC", "E1EAFF"   # 分组色 0/1/2
 A_LIGHT, A_DARK = "AD82F7", "6425D0"                    # 操作数 A（浅/深）
@@ -456,8 +457,8 @@ def tensor_block(slide, x, y, label, color, cols=6, rows=2,
 
 
 def spec_table(slide, x, y, header, rows, col_w=(1.30, 1.26, 1.33, 5.09),
-               row_h=(0.80, 0.878, 0.556, 0.556, 0.556, 0.556)):
-    """张量参数表：张量 | 形状 | 案例 shape | 说明。"""
+               row_h=(0.80, 0.878, 0.556, 0.556, 0.556, 0.556), zebra=True):
+    """张量参数表：张量 | 形状 | 案例 shape | 说明。zebra 规则同 panel。"""
     tbl = _plain_table(slide, x, y, len(rows) + 1, len(header),
                        cell_w=col_w[0], cell_h=int(row_h[0] * 914400))
     for i, w in enumerate(col_w):
@@ -470,9 +471,12 @@ def spec_table(slide, x, y, header, rows, col_w=(1.30, 1.26, 1.33, 5.09),
         _write_cell(cell, head, size=15.5, bold=False,
                     color=(STRONG_TEXT if c == 0 else TITLE_TEXT), cjk_font=CJK)
     for r, row in enumerate(rows, start=1):
+        band = ZEBRA_FILL if (zebra and r % 2 == 1) else None
         for c, val in enumerate(row):
             cell = tbl.cell(r, c)
             _cell_border(cell)
+            if band:
+                _fill_cell(cell, band)
             _write_cell(cell, val, size=15.5, bold=False, color=TITLE_TEXT)
     return tbl
 
@@ -626,14 +630,14 @@ def lane_shades(set_name: str, lane: int, n: int, lo=0.30, hi=0.62):
 
 def tag_row(slide, x, y, tags, size=13.0, pad=0.16, gap=0.14, h=0.34,
             bg="EEF2FF", border="C9D6F5"):
-    """一行标签芯片（如 layout / causal / 头型），用来标清这条规则适用的场景。
+    """一行标签芯片（如 layout / causal / MHA），用来标清这条规则适用的场景。
 
-    tags: [(标签, 值), ...]；返回右端 x。
+    tags: [(标签, 值), ...]；标签为空串时只画值（如 `("", "MHA")`）。返回右端 x。
     """
     from pptx.enum.shapes import MSO_SHAPE
     cur = x
     for label, value in tags:
-        body = f"{label} {value}"
+        body = f"{label} {value}" if label else str(value)
         w = est_text_width(body, size) + pad * 2
         box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(cur),
                                      Inches(y), Inches(w), Inches(h))
@@ -736,11 +740,12 @@ def task_matrix(slide, x, y, core_labels, rows, col_w=4.2, row_h=0.52,
 
 
 def trace_table(slide, x, y, col_labels, rows, total_w=6.90, first_col_w=1.20,
-                row_h=0.40, size=11.0, head=None, empty="空闲"):
+                row_h=0.40, size=11.0, head=None, empty="空闲", zebra=True):
     """轮次轨迹表：**行 = 核，列 = 轮次**，格内写这条核这一轮拿到的列（或批）。
 
     它是任务矩阵的转置视角 —— 任务矩阵回答"这一轮各核在做什么"，
     这张表回答"一条核连着几轮守着同一列"。cells 里 None 表示这一轮空闲。
+    隔行底色只铺在普通格上；自带底色的格（dict / 空闲）覆盖它。
     返回底边 y。
     """
     n = len(col_labels)
@@ -761,8 +766,11 @@ def trace_table(slide, x, y, col_labels, rows, total_w=6.90, first_col_w=1.20,
         _write_cell_lines(cell, [str(body)], size=size, colors=[TITLE_TEXT])
     hole = hole_color()
     for r, (rlabel, cells) in enumerate(rows, start=1):
+        band = ZEBRA_FILL if (zebra and r % 2 == 1) else None
         cell = tbl.cell(r, 0)
         _cell_border(cell)
+        if band:
+            _fill_cell(cell, band)
         _write_cell_lines(cell, [str(rlabel)], size=size, colors=[TITLE_TEXT])
         for c in range(n):
             cell = tbl.cell(r, c + 1)
@@ -777,6 +785,8 @@ def trace_table(slide, x, y, col_labels, rows, total_w=6.90, first_col_w=1.20,
                 _write_cell_lines(cell, [empty], size=size * 0.85,
                                   colors=[hole["text"]])
             else:
+                if band:
+                    _fill_cell(cell, band)
                 _write_cell_lines(cell, [str(val)], size=size, colors=[TITLE_TEXT])
     return fit_table(tbl), y + (len(rows) + 1) * row_h
 
@@ -991,10 +1001,11 @@ def panel_height(n_rows, row_h=0.42, gap=0.44):
 
 
 def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None,
-          gap=0.44):
+          gap=0.44, zebra=True):
     """带表外标题的小表（标题不占表格空间）。返回底边 y。
 
     gap：标题与表格之间的间距 —— 表块和文字不要贴太近，留够呼吸。
+    zebra：全白表格隔行铺 `ZEBRA_FILL`，白/灰相间让行更分明。
     格内文本用 `\\n` 分行（较长的一句拆两行，比把表拉宽更省地方）。
     """
     text(slide, x, y, head, w=(w or sum(col_w) + 0.4), h=0.30, size=15.0, bold=True)
@@ -1010,9 +1021,12 @@ def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None,
         _fill_cell(cell, ON_BLOCK)
         _write_cell_lines(cell, [h_], size=size, colors=[TITLE_TEXT])
     for r, row in enumerate(rows, start=1):
+        band = ZEBRA_FILL if (zebra and r % 2 == 1) else None
         for c, val in enumerate(row):
             cell = tbl.cell(r, c)
             _cell_border(cell)
+            if band:
+                _fill_cell(cell, band)
             lines = str(val).split("\n")
             _write_cell_lines(cell, lines, size=size,
                               colors=[TITLE_TEXT] * len(lines))
@@ -1020,13 +1034,13 @@ def panel(slide, x, y, head, header, rows, col_w, row_h=0.42, size=13.0, w=None,
 
 
 def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
-              cell_in=0.62, row_label="S1", col_label="S2", tick=True,
+              cell_in=0.62, row_label="S1", col_label="S2",
               empty_text="空闲", label_size=13.0, shade_count=None,
               head_size=12.0):
     """带轴头的覆盖图：列头 `S2=1..n`、行头 `S1=1..m`、格内是内容 + lane 配色。
 
     cells: {(r-1, c-1): (文本, lane 序号[, shade 序号])}；缺的格子填 hole 灰。
-    caption 只占本表宽度并紧贴其上，另加一小段竖线钉住，避免归属歧义。
+    caption 只占本表宽度并紧贴其上，避免归属歧义。
     row_label / col_label 里写 `{v}` 就按它排版（如 `虚拟行{v}`），
     否则默认按 `标签=序号` 写；轴头文字比格内文字小一号时用 head_size。
     """
@@ -1079,8 +1093,6 @@ def axis_grid(slide, x, y, n_rows, n_cols, cells, caption=None, lane_set="cool",
     if caption:
         text(slide, x + 0.04, y - 0.46, caption, w=(n_cols + 1) * cell_in, h=0.30,
              size=14.0, bold=True, color=TITLE_TEXT)
-        if tick:
-            arrow(slide, x + 0.10, y - 0.11, x + 0.10, y, width_pt=0.75, color=BORDER)
     return tbl
 
 

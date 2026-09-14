@@ -35,7 +35,7 @@ META = {
     ix.KIND_DENSE_SWIZZLE: dict(
         en="Dense Swizzle", cn="列私有 swizzle", low=lambda s, kw: "S2 列",
         tags=lambda s, kw: [("layout", "TND" if "cu_q" in kw else "BSND"),
-                            ("causal", "否"), ("头型", "MHA (g=1)"),
+                            ("causal", "否"), ("", "MHA"),
                             ("dk/dV", "列私有")],
         why=["低位是 S2 列 → 同一轮里相邻的核落在**相邻两列**上；",
              "task id 在 m 轮内不变 → 一条核**守死一条列**，列内把 S1 走一遍。",
@@ -43,14 +43,14 @@ META = {
     ix.KIND_DENSE_INDEX: dict(
         en="Dense Index", cn="先分批再分列", low=lambda s, kw: "B 批次",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "否"),
-                            ("头型", "MHA (g=1)"), ("dk/dV", "列私有"),
+                            ("", "MHA"), ("dk/dV", "列私有"),
                             ("核数", "> S1 块数")],
         why=["低位换成 batch → 同一轮各核**分属不同 batch**，S1 撞不到一起；",
              "所以**核数可以超过 S1 块数**，代价是列私有要靠切片保证。"]),
     ix.KIND_CAUSAL_SWIZZLE: dict(
         en="Causal Swizzle", cn="因果折叠", low=lambda s, kw: "S2（fold 后）",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "是，方形"),
-                            ("头型", "MHA (g=1)"), ("buffer", "2 个 (parity)"),
+                            ("", "MHA"), ("buffer", "2 个 (parity)"),
                             ("可达性", "↪ 仅 Left-Up 内部委托")],
         why=["fold 把两个相邻 batch 的三角拼成一个 **m x (n+1) 的满矩形**，task id 在矩形里照排；",
              "奇数列用 parity-0、偶数列用 parity-1 buffer → 一条核在两个 batch 间来回切。",
@@ -60,7 +60,7 @@ META = {
         low=lambda s, kw: "S2 列（同方形折叠）" if s.M() <= s.N() else "S2（虚拟）",
         tags=lambda s, kw: [("layout", "BSND"),
                             ("causal", "是，S1 = S2" if s.M() <= s.N() else "是，S1 > S2"),
-                            ("头型", "MHA (g=1)"),
+                            ("", "MHA"),
                             ("S1 = S2 时", "委托方形折叠" if s.M() <= s.N() else "用左上几何"),
                             ("buffer", "2 个 (parity)"),
                             ("可达性", "★ 偶 batch 且 S1 = S2")],
@@ -73,19 +73,19 @@ META = {
     ix.KIND_GQA_DENSE: dict(
         en="GQA Dense", cn="任务切片", low=lambda s, kw: "S2（切片）",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "跟随 epilogue mask"),
-                            ("头型", "GQA (g>1)"), ("dk/dV", "共享 workspace")],
+                            ("", "GQA"), ("dk/dV", "共享 workspace")],
         why=["一个 KV head 对应 g 个 Q head → 同一 KV 列的 g 份贡献**不保证同核**；",
              "（R 与 g 非整除或 gcd 修正时会分裂）→ 切片分核 + 共享 workspace 的轮序 atomic add。"]),
     ix.KIND_TND_DENSE: dict(
         en="TND Dense Swizzle", cn="逐批列私有", low=lambda s, kw: "本批 S2 列",
         tags=lambda s, kw: [("layout", "TND (变长)"), ("causal", "否"),
-                            ("头型", "MHA (g=1)"), ("dk/dV", "列私有")],
+                            ("", "MHA"), ("dk/dV", "列私有")],
         why=["每个 batch 有自己的 round 前缀，**批内仍按列私有**排；",
              "核数超过本批列数时那一条核空转 —— 变长 batch 的代价。"]),
     ix.KIND_TND_GQA_DENSE: dict(
         en="TND GQA Dense", cn="按面积展平", low=lambda s, kw: "展平索引",
         tags=lambda s, kw: [("layout", "TND (变长)"), ("causal", "跟随 epilogue mask"),
-                            ("头型", "GQA (g>1)"), ("dk/dV", "共享 workspace")],
+                            ("", "GQA"), ("dk/dV", "共享 workspace")],
         why=["按面积前缀把任务空间**展平后等分成 k 段**，每条核顺序扫自己那段；",
              "不追求列私有，只保证**同轮各核的 (B,N2,G,S1) 互不相同**。"]),
 }
@@ -617,7 +617,6 @@ def _virtual_grid(slide, x, y, n_cols, n_rows, cells, lane_set=LANE_SET,
                                      colors=[col["text"]] * len(label.split()))
     sd.text(slide, x + 0.04, y - 0.40, "fold 后的虚拟矩形（行 = 虚拟 S1，列 = 虚拟 S2）",
             w=(n_cols + 1) * cell_w, h=0.30, size=13.0, bold=True)
-    sd.arrow(slide, x + 0.10, y - 0.08, x + 0.10, y, width_pt=0.75, color=sd.BORDER)
     return y + (n_rows + 1) * cell_h
 
 
@@ -640,7 +639,7 @@ def draw_overview(prs):
                      str(mr),
                      m["low"](shape, kw)))
     sd.spec_table(s, 0.73, 1.72,
-                  ("规则", "layout", "causal", "头型", "列私有", "总轮数", "低位先走哪个轴"),
+                  ("规则", "layout", "causal", "MHA/GQA", "列私有", "总轮数", "低位先走哪个轴"),
                   rows,
                   col_w=(2.75, 1.10, 0.95, 0.95, 0.95, 0.95, 2.10),
                   row_h=(0.58,) + (0.62,) * 7)

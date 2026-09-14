@@ -199,8 +199,8 @@ The full list is in `SKILL.md`. The ones that bite most often:
 2. **No large empty areas.** Fill them with comparison tables, cost numbers, or an intermediate
    form of the data — never with filler prose.
 3. **Every page needs a title**; if there is a subtitle, put it below the title at a smaller size.
-4. **A table's ownership label must hug its own table** (span only that table's width, plus a
-   short tick line pinning it down).
+4. **A table's ownership label must hug its own table** (span only that table's width, right
+   above it).
 5. **Explain the logic, don't cite code.** Put a pseudocode block before each example; no file
    names or line numbers on the page.
 6. **Cell values must name the axis index** (`S1=2 S2=3`), not bare comma-separated numbers.
