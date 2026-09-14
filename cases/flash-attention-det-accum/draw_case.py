@@ -1,6 +1,6 @@
 """画出本案例的完整页面。
 
-    python draw_case.py out/v4-index-schedules.pptx
+    python draw_case.py out/v3-index-schedules.pptx
 
 页面顺序：0 总览 → 1 轴遍历顺序与 dS 分块 → 2..8 七种索引算法各两页。
 术语约定：不适合直译的直接用英文原词（swizzle / layout / causal / mask / task id /
@@ -1106,12 +1106,12 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
 PERF_SHAPES = ["b1_s1024", "b1_s2048", "b1_s4096", "b1_s8192",
                "b2_s4096", "b4_s4096", "b8_s4096", "b4_s8192"]
 PERF_TIMES = {
-    "v4-det": [77.2, 187.8, 590.6, 2327.3, 1257.1, 2527.7, 5286.7, 9834.3],
-    "v4-nd": [55.5, 138.9, 498.5, 1905.2, 1087.5, 2416.5, 4984.0, 8703.9],
+    "v3-det": [77.2, 187.8, 590.6, 2327.3, 1257.1, 2527.7, 5286.7, 9834.3],
+    "v3-nd": [55.5, 138.9, 498.5, 1905.2, 1087.5, 2416.5, 4984.0, 8703.9],
     "opst-det": [57.3, 123.9, 393.8, 1501.4, 922.6, 2703.3, 5444.3, 11976.0],
     "opst-nd": [46.7, 104.3, 338.4, 1348.1, 775.8, 1639.7, 3875.9, 6055.6],
 }
-PERF_COLORS = {"v4-det": sd.PERF_SELF, "v4-nd": sd.PERF_SELF_ALT,
+PERF_COLORS = {"v3-det": sd.PERF_SELF, "v3-nd": sd.PERF_SELF_ALT,
                "opst-det": sd.PERF_REF, "opst-nd": sd.PERF_REF_ALT}
 
 
@@ -1144,18 +1144,18 @@ def draw_perf_pages(prs):
     def div(a, b):
         return [x / y for x, y in zip(T[a], T[b])]
 
-    det_cost_ours = div("v4-det", "v4-nd")
+    det_cost_ours = div("v3-det", "v3-nd")
     det_cost_opst = div("opst-det", "opst-nd")
-    det_ratio = div("opst-det", "v4-det")
-    nd_ratio = div("opst-nd", "v4-nd")
+    det_ratio = div("opst-det", "v3-det")
+    nd_ratio = div("opst-nd", "v3-nd")
 
     draw_perf_page(
         prs, "9.1", "性能对比：确定性开销（det / nd 核时倍率）",
-        "本仓库：v4-det / v4-nd（基线）；参考仓库：opst-det / opst-nd · "
+        "本仓库：v3-det / v3-nd（基线）；参考仓库：opst-det / opst-nd · "
         "causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧），非 event record",
         [dict(title="Deterministic penalty (det / nd kernel time, > 1 = det slower)",
               groups=PERF_SHAPES,
-              series=[("ours (v4)", det_cost_ours, sd.PERF_SELF),
+              series=[("ours (v3)", det_cost_ours, sd.PERF_SELF),
                       ("opst", det_cost_opst, sd.PERF_REF)],
               ylabel="ratio", best=0, value_fmt="{:.2f}")],
         "核时取自 msprof Task Duration 中位数；倍率 = det 核时 / nd 核时（profiling 口径，非 event record）",
@@ -1178,7 +1178,7 @@ def draw_perf_pages(prs):
               value_fmt="{:.2f}")],
         "核时取自 msprof Task Duration 中位数；比值 = opst-det / 本仓库-det；<1 的柱标灰 = 本仓库更慢",
         "核时 (μs)",
-        [("本仓库 det", T["v4-det"]), ("opst det", T["opst-det"])],
+        [("本仓库 det", T["v3-det"]), ("opst det", T["opst-det"])],
         ["{:.1f}"] * 2, highlight=(0,),
         read_rows=[("> 1", "本仓库更快（蓝柱）"),
                    ("< 1", "本仓库更慢（灰柱）"),
@@ -1196,7 +1196,7 @@ def draw_perf_pages(prs):
               value_fmt="{:.2f}")],
         "核时取自 msprof Task Duration 中位数；比值 = opst-nd / 本仓库-nd；<1 的柱标灰 = 本仓库更慢",
         "核时 (μs)",
-        [("本仓库 nd", T["v4-nd"]), ("opst nd", T["opst-nd"])],
+        [("本仓库 nd", T["v3-nd"]), ("opst nd", T["opst-nd"])],
         ["{:.1f}"] * 2, highlight=(0,),
         read_rows=[("< 1 全部", "本仓库 nd 全面慢于 opst"),
                    ("差距", "1.19–1.47×（既有问题）"),
@@ -1236,6 +1236,6 @@ def main(path):
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else "out/v4-index-schedules.pptx"
+    out = sys.argv[1] if len(sys.argv) > 1 else "out/v3-index-schedules.pptx"
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     sys.exit(1 if main(out) else 0)

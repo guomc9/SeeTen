@@ -37,12 +37,12 @@ construction.
 | `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
 | `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
 | `check_case.py` | Content self-check: matrix readback vs algorithms, printed-formula replay, claim cross-checks |
-| `out/v4-index-schedules.pptx` | The generated pages (21: overview + axis walkthrough + virtual-column page + 7 methods x 2 + a harder non-square causal example + three performance comparison pages) |
+| `out/v3-index-schedules.pptx` | The generated pages (21: overview + axis walkthrough + virtual-column page + 7 methods x 2 + a harder non-square causal example + three performance comparison pages) |
 
 ```bash
 python index_schedules.py          # check the seven algorithms first (expect zero conflicts)
-python draw_case.py out/v4-index-schedules.pptx   # generate the pages
-python check_case.py out/v4-index-schedules.pptx  # matrix + formula + claim self-check
+python draw_case.py out/v3-index-schedules.pptx   # generate the pages
+python check_case.py out/v3-index-schedules.pptx  # matrix + formula + claim self-check
 ```
 
 ## The seven index algorithms

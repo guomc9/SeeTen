@@ -1,6 +1,6 @@
 """对生成出来的 pptx 做内容自检 —— 公式回代 + 矩阵回读 + 结论核对。
 
-    python check_case.py out/v4-index-schedules.pptx
+    python check_case.py out/v3-index-schedules.pptx
 
 四类检查（对应 style-spec.md §7 的内容正确性约定）：
 
@@ -327,12 +327,12 @@ def main(pptx_path):
 
     for header, labels, exp_rows in [
             ("det/nd 开销 (×)", ["本仓库", "opst"],
-             [fmt([a / b for a, b in zip(T["v4-det"], T["v4-nd"])], "{:.2f}"),
+             [fmt([a / b for a, b in zip(T["v3-det"], T["v3-nd"])], "{:.2f}"),
               fmt([a / b for a, b in zip(T["opst-det"], T["opst-nd"])], "{:.2f}")]),
             ("核时 (μs)", ["本仓库 det", "opst det"],
-             [fmt(T["v4-det"], "{:.1f}"), fmt(T["opst-det"], "{:.1f}")]),
+             [fmt(T["v3-det"], "{:.1f}"), fmt(T["opst-det"], "{:.1f}")]),
             ("核时 (μs)", ["本仓库 nd", "opst nd"],
-             [fmt(T["v4-nd"], "{:.1f}"), fmt(T["opst-nd"], "{:.1f}")])]:
+             [fmt(T["v3-nd"], "{:.1f}"), fmt(T["opst-nd"], "{:.1f}")])]:
         t = find_table(header, labels)
         if t is None:
             fail(f"性能页缺表: {header} / {labels}")
@@ -362,4 +362,4 @@ def main(pptx_path):
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1] if len(sys.argv) > 1
-                  else "out/v4-index-schedules.pptx"))
+                  else "out/v3-index-schedules.pptx"))
