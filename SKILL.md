@@ -132,11 +132,13 @@ SeeTen/
     ① `sd.check_layout(prs)` 0 越界 0 重叠 → ② `sd.check_cells(prs)` 0 格内顶格 →
     ③ `verify_demo.py` 表样式/字体回读一致 → ④ `render_deck.ps1` 渲染后逐页看图 →
     ⑤ case 的 `check_case.py`（公式回代 + 结论句核对）0 失配。
-17. **性能对比图可选，只有拿到数据才画。** 两种对比范围：本仓库自身版本 / 与参考仓库
-    （opst）。两种图形：核时**表**（必须用 profiling 的 device 侧 kernel 时间，
-    **不能用 event record 端到端时间**）与吞吐/带宽**柱状图**（写清指标与归一基准）。
-    色系取 DeepSeek 图：本仓库宝蓝 `#4D6BFE`（白斜纹）+ 次版本浅蓝，参考方灰系；
-    实现见 `sd.perf_table()` / `sd.perf_bars()`，细节见 `references/style-spec.md` §8。
+17. **性能对比图可选，只有拿到数据才画。** 分清三类对比：det vs det（本仓库 vs
+    参考仓库 opst）、确定性开销（各仓库内部 det / nd）、本仓库自身版本。核时**表**
+    只认 profiling 的 device 侧 kernel 时间，**不能用 event record 端到端时间**
+    （建议 7 行：4 行原始核时 + 3 行比值，表字号 12.5）；吞吐/带宽**柱状图**优先
+    `sd.perf_figure()`（matplotlib 渲染后贴图，写清指标与归一基准），没有 matplotlib
+    时退回 `sd.perf_bars()`。色系取 DeepSeek 图：本仓库宝蓝 `#4D6BFE`（白斜纹）+
+    次版本浅蓝，参考方灰系；细节见 `references/style-spec.md` §8。
 
 ## 风格地基（复刻这套观感时不变的部分）
 

@@ -307,25 +307,43 @@ def main(pptx_path):
         for sh in sl.shapes:
             if sh.has_text_frame:
                 perf_texts.append(sh.text_frame.text)
-            if (getattr(sh, "has_table", False) and sh.has_table
-                    and sh.table.cell(0, 0).text.strip() == "核时 (μs)"):
-                perf_tbl = sh.table
+            if getattr(sh, "has_table", False) and sh.has_table:
+                perf_texts.extend(tc.text for row in sh.table.rows
+                                  for tc in row.cells)
+                if sh.table.cell(0, 0).text.strip() == "核时 (μs)":
+                    perf_tbl = sh.table
     if perf_tbl is None:
         fail("性能页: 找不到『核时 (μs)』表")
     else:
+        T = dc.PERF_TIMES
+        exp = [("本仓库 det 核时 (μs)", [f"{v:.1f}" for v in T["v4-det"]]),
+               ("本仓库 nd 核时 (μs)", [f"{v:.1f}" for v in T["v4-nd"]]),
+               ("opst det 核时 (μs)", [f"{v:.1f}" for v in T["opst-det"]]),
+               ("opst nd 核时 (μs)", [f"{v:.1f}" for v in T["opst-nd"]])]
+        for a, b in (("v4-det", "v4-nd"), ("opst-det", "opst-nd"),
+                     ("opst-det", "v4-det")):
+            exp.append((f"ratio {a}/{b}",
+                        [f"{x / y:.2f}" for x, y in zip(T[a], T[b])]))
+        got = {perf_tbl.cell(r, 0).text.strip():
+               [perf_tbl.cell(r, c).text.strip()
+                for c in range(1, len(perf_tbl.columns))]
+               for r in range(1, len(perf_tbl.rows))}
+        labels = ["本仓库 det 核时 (μs)", "本仓库 nd 核时 (μs)",
+                  "opst det 核时 (μs)", "opst nd 核时 (μs)",
+                  "本仓库 det/nd 开销 (×)", "opst det/nd 开销 (×)",
+                  "det 对比 opst/本仓库 (×)"]
         bad = 0
-        for si, (name, vals) in enumerate(dc.PERF_TIMES.items()):
-            if perf_tbl.cell(si + 1, 0).text.strip() != name:
+        for (_, vals), label in zip(exp, labels):
+            row = got.get(label)
+            if row is None or row != vals:
                 bad += 1
-            for ci, v in enumerate(vals):
-                if perf_tbl.cell(si + 1, ci + 1).text.strip() != f"{v:.1f}":
-                    bad += 1
         if bad:
-            fail(f"性能页核时表: {bad} 格与 PERF_TIMES 不符")
+            fail(f"性能页核时表: {bad} 行与数据不符")
         else:
-            ok(f"性能页核时表: {len(dc.PERF_TIMES)}×{len(dc.PERF_SHAPES)} 格与数据一致")
+            ok(f"性能页核时表: 7 行 × {len(dc.PERF_SHAPES)} 列与数据一致")
     blob = " ".join(perf_texts)
-    for token in ("非 event record", "msprof", "v4-det", "opst-det", "倒数"):
+    for token in ("非 event record", "msprof", "Task Duration",
+                  "det/nd", "opst/本仓库"):
         if token in blob:
             ok(f"性能页标注含「{token}」")
         else:

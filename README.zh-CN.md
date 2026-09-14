@@ -39,7 +39,7 @@ npx github:guomc9/SeeTen init
 这一条命令会：
 
 - 把 skill 装到你的 agent CLI 的 skill 目录（自动识别 `.claude/`、`AGENTS.md`、`CLAUDE.md`、`KIMI.md`）；
-- 备好 `python-pptx` —— 系统 Python 已经装了就直接复用，没装就在 `~/.seeten/venv`
+- 备好 `python-pptx`（性能对比图另需可选的 `matplotlib`）—— 系统 Python 已经装了就直接复用，没装就在 `~/.seeten/venv`
   建独立环境（**不动你的系统环境**）；
 - 生成一份演示 deck 并跑版心自检，有问题当场就能看到；
 - 报告 PNG 导出（WPS / LibreOffice）能不能用，也就是"渲染看图"这步可不可行。
@@ -109,7 +109,8 @@ cp -r SeeTen ~/.claude/skills/seeten-draw
 
 画张量/分块/调度类示意图、PPT 页面时，先读 `SeeTen/SKILL.md` 并遵守其中的硬规则；
 风格参数一律从 `SeeTen/assets/*.json` 与 `SeeTen/references/style-spec.md` 取。
-生成脚本用 `SeeTen/scripts/seeten_draw.py`（需要 python-pptx）。
+生成脚本用 `SeeTen/scripts/seeten_draw.py`（需要 python-pptx；matplotlib 可选，仅 `perf_figure`
+性能对比页需要）。
 ```
 
 ### 2.3 Kimi Code 及其他 CLI

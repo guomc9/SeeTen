@@ -24,7 +24,7 @@
 | 选型对照表 | Dense Swizzle 与 Dense Index 按"低位先走哪个轴"逐条对比，并写明各自什么时候用 |
 | 空白处补辅助表 | 对比表、代价数字、每核负责的列；按优先级塞进两栏，哪栏有地方放哪栏 |
 | 归属标记钉在表上 | `B=1`、`N2=1`、`G=1` 只占自己那张图的宽度并紧贴其上 |
-| 性能对比页（可选） | 核时表（msprof kernel 时间，非 event record）同时覆盖两种对比范围（本仓库自身版本 / 参考仓库 opst），配一张 DeepSeek 色系的相对吞吐柱状图 |
+| 性能对比页（可选） | 核时表（msprof kernel 时间，非 event record）拆成 det-vs-det（本仓库 / opst）与确定性开销（各仓库 det/nd），配两张 matplotlib 渲染的 DeepSeek 色系对比图 |
 
 ## 文件
 

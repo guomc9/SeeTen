@@ -70,6 +70,10 @@
 | 对齐 | 垂直居中（`anchor="ctr"`）+ 段落水平居中（`algn="ctr"`） |
 | 表格样式 | **无表样式**：`a:tblPr` 只有 `effectLst`，没有 `tableStyleId`，不启用首行/镶边 |
 
+**格内留白**：文字与格线之间至少留约 **2 个字符**的余量（≈0.10–0.15 in/边）。
+格子小、内容多时先放大格子或改短文本（如 `第1轮` → `T1`），再考虑缩字号；
+"塞得下但不报错"不等于不拥挤 —— `check_cells` 只查越界，不查观感。
+
 **基础块（fundamental block）= 2 列 × 2 行 的单元格补丁**：
 - 同一补丁内所有格子填同一颜色；
 - 块号写在补丁的每个格子里（`B0 B0 / B0 B0`）；若纵向连续同色，只在最上一行写块号，其余只填色；
@@ -220,20 +224,28 @@
 
 **非必须**：只有手上确实有性能对比数据时才画这一节；没有数据就不画，不要用估算冒充实测。
 
-两种对比范围，页面上要写清是哪一种（或两种并列）：
+**三类对比要分清**（页面上要写明是哪一类）：
 
-- **本仓库自身版本**：如 v3 vs v4、deterministic vs 非 deterministic、优化前后；
-- **与参考仓库（opst）**：本实现 vs 参考实现。参考方用灰系，本仓库用蓝系。
+- **det vs det（跨仓库）**：本仓库确定性实现 vs 参考仓库（opst）确定性实现
+  —— 同口径比核时；
+- **确定性开销（各仓库内部）**：本仓库 det / nd、参考仓库 det / nd
+  —— 得到各自的"确定性性能损失"；
+- **本仓库自身版本**：如 v3 vs v4、优化前后。
 
 两种图形：
 
-1. **表格 —— 比核时（profiling 时间）**。用 device 侧 kernel 时间（如 msprof 的
-   `Task Duration`），表格下方必须注明口径。**不要用 event record 的端到端时间**：
-   它包含 host 调度、下发与同步开销，波动大，不能代表 kernel 本身的代价。
-   核时表默认加粗每列最优值、浅蓝底标出本仓库版本（`perf_table` 的 `highlight`）。
-2. **柱状图 —— 比吞吐 / 带宽**（越大越好）。值可以是实测吞吐/带宽，也可以由核时
-   倒数归一（倍率），但必须在注里写明来源和归一基准；主系列（本仓库当前版本）
-   用宝蓝 + 白色宽斜纹，与参考方的灰系区分。
+1. **核时表**（`sd.perf_table`）：用 device 侧 kernel 时间（如 msprof 的 `Task Duration`），
+   表格下方必须注明口径。**不要用 event record 的端到端时间**：它包含 host 调度、
+   下发与同步开销，波动大，不能代表 kernel 本身的代价。
+   推荐排布：先 4 行原始核时（本仓库 det / nd、opst det / nd），再 3 行比值
+   （本仓库 det/nd、opst det/nd、det 对比 opst/本仓库）；`highlight` 标本仓库行。
+   表格数据字号建议 **12–12.5 pt**（核时是主角，别缩到 11 以下），列宽不够时
+   减少 shape 数量而不是缩字。
+2. **柱状图 —— 比吞吐 / 带宽**（越大越好）。**推荐 `sd.perf_figure()`：用
+   matplotlib 渲染成 PNG 再贴进页面**（比原生矩形柱精细得多；可选依赖，
+   `pip install matplotlib`）。值可以由核时相除/取倒数归一（倍率），但必须在注里
+   写明来源与基准；主系列（本仓库）用宝蓝 + 白色斜纹，参考方用灰系。
+   没有 matplotlib 时退回 `sd.perf_bars()`（原生形状，可编辑但较粗糙）。
 
 **色板**（取自 DeepSeek-V3 benchmark 图 `figures/benchmark.png`）：
 
@@ -248,15 +260,33 @@
 用法：
 
 ```python
-sd.perf_table(s, 0.73, 2.0, ["b1_s4096", "b4_s8192"], [
-    ("v4-det (ours)", [590.6, 9834.3], sd.PERF_SELF),
-    ("opst-det",      [393.8, 11976.0], sd.PERF_REF),
-], header="核时 (μs)", highlight=(0,))
-sd.perf_bars(s, 0.73, 6.0, 9.6, ["b1_s4096", "b4_s8192"], [
-    ("v4-det", [1.00, 1.22]),
-    ("opst-det", [1.50, 1.00]),
-], ylabel="相对吞吐（opst-det = 1.0，>1 更快）", note="核时取倒数归一；msprof 核时")
+# 核时 + 比值表（字号 12.5，本仓库行浅蓝底，原始行加粗最优）
+sd.perf_table(s, 0.73, 5.95, shapes,
+              [("本仓库 det 核时 (μs)", t_ours_det),
+               ("本仓库 nd 核时 (μs)", t_ours_nd),
+               ("opst det 核时 (μs)", t_opst_det),
+               ("opst nd 核时 (μs)", t_opst_nd),
+               ("本仓库 det/nd 开销 (×)", ratio_ours),
+               ("opst det/nd 开销 (×)", ratio_opst),
+               ("det 对比 opst/本仓库 (×)", ratio_det)],
+              first_col_w=1.95, col_w=1.05, size=12.5,
+              fmts=["{:.1f}"] * 4 + ["{:.2f}"] * 3, best_rows=(0, 1, 2, 3),
+              highlight=(0, 1))
+
+# 两张对比图：matplotlib 渲染后贴图（图内文字用英文，避开缺 CJK 字体）
+sd.perf_figure(s, 0.73, 1.68, 15.2, 3.85, [
+    dict(title="Determinism cost (det / nd, >1 = det slower)", groups=shapes4,
+         series=[("ours (v4)", ratio_ours4, sd.PERF_SELF),
+                 ("opst", ratio_opst4, sd.PERF_REF)], ylabel="ratio", best=0),
+    dict(title="Det vs det (opst / ours, >1 = ours faster)", groups=shapes4,
+         series=[("ours v4-det", ratio_det4, sd.PERF_SELF)],
+         ylabel="ratio", best=0, ref=1.0),
+], note="核时取自 msprof Task Duration 中位数（profiling 口径，非 event record）")
 ```
+
+> 图内文字默认 DejaVu Sans（无 CJK 字形）：请把图内标题/标签写成英文，
+> 中文说明放在页面文字和表格里；要用中文图注就给 `perf_figure(font="Noto Sans SC")`
+> 并确保环境装了该字体。
 
 ## 9. 容易踩的坑
 

@@ -1160,12 +1160,14 @@ def _bar_shape(slide, x, y, w, h, color, hatch=False, outline=True):
 
 def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.35,
                col_w=0.95, size=11.5, row_h=0.38, best="min", fmt="{:.1f}",
-               highlight=(), note=None):
+               fmts=None, best_rows=None, highlight=(), note=None):
     """性能对比表：核时 / 吞吐的横向对比（可选，有 profiling 数据才画）。
 
     cols      : 列标签（shape / 配置）
     series    : [(名称, [值, ...]), ...]
     best      : 每列加粗最优值 —— 核时越小越好用 "min"，吞吐越大越好用 "max"
+    fmts      : 逐行格式（缺省全部用 fmt）；比值行可单独用 "{:.2f}"
+    best_rows : 参与"最优加粗"的行号（缺省全部；比值行语义不一可只留原始数据行）
     highlight : 行号集合，浅蓝底标出本仓库版本
     note      : 口径备注。核时表必须注明是 **profiling 核时**、不是 event record
     """
@@ -1185,8 +1187,11 @@ def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.3
         _fill_cell(cell, ON_BLOCK)
         _write_cell(cell, str(h_), size=size, bold=False, color=TITLE_TEXT,
                     cjk_font=CJK)
-    picks = [min(s[1][ci] for s in series) if best == "min"
-             else max(s[1][ci] for s in series) for ci in range(len(cols))]
+    fmts = fmts or [fmt] * n
+    best_rows = list(range(n)) if best_rows is None else list(best_rows)
+    picks = [min(series[ri][1][ci] for ri in best_rows) if best == "min"
+             else max(series[ri][1][ci] for ri in best_rows)
+             for ci in range(len(cols))]
     for si, s in enumerate(series):
         label, vals = s[0], s[1]
         r = si + 1
@@ -1206,8 +1211,8 @@ def perf_table(slide, x, y, cols, series, header="核时 (μs)", first_col_w=1.3
             _cell_border(cell)
             if band:
                 _fill_cell(cell, band)
-            is_best = abs(float(v) - float(picks[ci])) < 1e-9
-            _write_cell(cell, fmt.format(v), size=size, bold=is_best,
+            is_best = si in best_rows and abs(float(v) - float(picks[ci])) < 1e-9
+            _write_cell(cell, fmts[si].format(v), size=size, bold=is_best,
                         color=STRONG_TEXT if is_best else TITLE_TEXT)
     fit_table(tbl)
     bottom = y + (n + 1) * row_h
@@ -1303,6 +1308,84 @@ def perf_bars(slide, x, y, w, groups, series, chart_h=3.30, ylabel=None,
     if note:
         text(slide, x, cb + 0.40, note, w=w, h=0.26, size=10.5, color=PERF_SUB)
         bottom += 0.30
+    return bottom
+
+
+def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
+    """用 matplotlib 渲染性能对比图（推荐），以 PNG 贴进页面。
+
+    panels : [dict(title=..., groups=[...], series=[(标签, [值, ...][, 颜色]) ...],
+                   ylabel=..., value_fmt="{:.2f}", best=0, ref=None), ...]
+             —— 每个 dict 一个子图；best = 用斜纹加粗强调的系列号；
+             ref = 参考虚线值（如 1.0）。
+    font   : matplotlib 字体族。缺省 DejaVu Sans —— 没有 CJK 字体时请把图内文字写成
+             英文，中文说明留在页面文字 / 表格里。
+    返回底边 y（含 note）。依赖 matplotlib（可选依赖；缺了请退回 perf_bars）。
+    """
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": [font] if font else ["DejaVu Sans"],
+        "axes.edgecolor": "#E3E3E3",
+        "text.color": "#" + PERF_AXIS, "axes.labelcolor": "#" + PERF_SUB,
+    })
+    fig, axes = plt.subplots(1, len(panels), figsize=(w, h), dpi=dpi)
+    if len(panels) == 1:
+        axes = [axes]
+    for ax, p in zip(axes, panels):
+        groups, series = p["groups"], p["series"]
+        n_g, n_s = len(groups), len(series)
+        width = 0.80 / n_s
+        best = p.get("best", 0)
+        xv = list(range(n_g))
+        vmax = 0.0
+        for si, s in enumerate(series):
+            label, vals = s[0], s[1]
+            color = s[2] if len(s) > 2 else (
+                PERF_SELF, PERF_SELF_ALT, PERF_REF, PERF_REF_ALT)[si % 4]
+            off = (si - (n_s - 1) / 2.0) * width
+            hatched = (si == best)
+            bars = ax.bar(
+                [v + off for v in xv], vals, width * 0.92, label=label,
+                color=("#" + color), zorder=3,
+                edgecolor=("white" if hatched else "#" + _darken(color)),
+                linewidth=(0.0 if hatched else 0.7), hatch=("///" if hatched else None))
+            vmax = max(vmax, max(vals))
+            for b, v in zip(bars, vals):
+                ax.text(b.get_x() + b.get_width() / 2.0, v,
+                        p.get("value_fmt", "{:.2f}").format(v),
+                        ha="center", va="bottom", zorder=4,
+                        fontsize=7.5, fontweight=("bold" if hatched else "normal"),
+                        color=("#1A1A1A" if hatched else "#" + PERF_SUB))
+        if p.get("ref") is not None:
+            ax.axhline(p["ref"], ls=(0, (4, 3)), lw=0.9, color="#" + PERF_AXIS, zorder=2)
+        ax.set_xticks(xv)
+        ax.set_xticklabels(groups, fontsize=8.8, fontweight="bold")
+        ax.set_ylabel(p.get("ylabel", ""), fontsize=8.8)
+        ax.set_title(p.get("title", ""), fontsize=10.0, fontweight="bold", pad=8)
+        ax.set_ylim(0, p.get("ymax") or vmax * 1.18)
+        ax.grid(axis="y", ls="--", lw=0.8, color="#E3E3E3")
+        ax.set_axisbelow(True)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        ax.spines["bottom"].set_color("#" + PERF_AXIS)
+        ax.tick_params(axis="both", labelsize=8.0, colors="#" + PERF_SUB,
+                       length=3, width=0.7)
+        ax.legend(frameon=False, fontsize=8.5, ncol=min(3, n_s), loc="upper left")
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, facecolor="white")
+    plt.close(fig)
+    buf.seek(0)
+    slide.shapes.add_picture(buf, Inches(x), Inches(y), width=Inches(w))
+    bottom = y + h
+    if note:
+        text(slide, x, bottom + 0.06, note, w=w, h=0.26, size=10.5, color=PERF_SUB)
+        bottom += 0.34
     return bottom
 
 

@@ -578,7 +578,7 @@ def flow(cols, items, gap=0.26):
 
 
 def _virtual_grid(slide, x, y, n_cols, n_rows, cells, lane_set=LANE_SET,
-                  cell_w=1.05, cell_h=0.62, shade_count=None):
+                  cell_w=1.05, cell_h=0.62, shade_count=None, label_size=11.0):
     tbl = sd._plain_table(slide, x, y, n_rows + 1, n_cols + 1,
                           cell_w=int(cell_w * 914400), cell_h=int(cell_h * 914400))
     for i in range(n_cols + 1):
@@ -594,26 +594,26 @@ def _virtual_grid(slide, x, y, n_cols, n_rows, cells, lane_set=LANE_SET,
         sd._cell_border(cell)
         if c:
             sd._fill_cell(cell, sd.ON_BLOCK)
-            sd._write_cell_lines(cell, [f"虚拟列{c}"], size=11.0, colors=[sd.TITLE_TEXT])
+            sd._write_cell_lines(cell, [f"虚拟列{c}"], size=label_size, colors=[sd.TITLE_TEXT])
     for r in range(1, n_rows + 1):
         cell = tbl.cell(r, 0)
         sd._cell_border(cell)
         sd._fill_cell(cell, sd.ON_BLOCK)
-        sd._write_cell_lines(cell, [f"虚拟行{r}"], size=11.0, colors=[sd.TITLE_TEXT])
+        sd._write_cell_lines(cell, [f"虚拟行{r}"], size=label_size, colors=[sd.TITLE_TEXT])
         for c in range(1, n_cols + 1):
             cell = tbl.cell(r, c)
             sd._cell_border(cell)
             got = cells.get((r - 1, c - 1))
             if got is None:
                 sd._fill_cell(cell, hole["fill"])
-                sd._write_cell_lines(cell, ["用不到"], size=10.5, colors=[hole["text"]])
+                sd._write_cell_lines(cell, ["用不到"], size=label_size - 0.5, colors=[hole["text"]])
             else:
                 label, lane = got[0], got[1]
                 shade = got[2] if len(got) > 2 else 0
                 col = (shades[lane % 8][shade % shade_count] if shades
                        else colors[lane % 8])
                 sd._fill_cell(cell, col["fill"])
-                sd._write_cell_lines(cell, label.split(), size=11.0,
+                sd._write_cell_lines(cell, label.split(), size=label_size,
                                      colors=[col["text"]] * len(label.split()))
     sd.text(slide, x + 0.04, y - 0.40, "fold 后的虚拟矩形（行 = 虚拟 S1，列 = 虚拟 S2）",
             w=(n_cols + 1) * cell_w, h=0.30, size=13.0, bold=True)
@@ -881,18 +881,18 @@ def draw_leftup_big_page(prs, num):
         sd.text(s, 10.60, 1.22 + i * 0.30, line, w=5.40, h=0.28, size=13.5,
                 color=sd.EMPH_COLOR)
     # 左栏：两个 batch 的真实覆盖图（阶梯状 = causal 区）
-    cell, gy = 0.62, 2.60
+    cell, gy = 0.64, 2.30               # 格子放大、字号收小：格内四周留够余量
     for bb in range(b):
         sd.axis_grid(s, LEFTX + bb * ((n + 2) * cell + 1.35), gy, m, n,
                      grid_cells(ts, bb), f"B={bb + 1}",
                      lane_set=LANE_SET, cell_in=cell, shade_count=n_max,
-                     empty_text="mask")
+                     label_size=10.5, head_size=10.0, empty_text="mask")
     sd.axis_arrow(s, LEFTX - 0.68, gy, (m + 1) * cell - cell * 0.6, "down", "S1")
-    sd.axis_arrow(s, LEFTX, gy - 0.72, (n + 1) * cell - cell * 0.6, "right", "S2")
+    # S2 箭头省掉：这一页副标题更长，S2 标签会压到副标题上；列头本身已写 S2=1..3
     # 左栏下方：折叠出来的虚拟矩形（行 = 虚拟 S1，列 = 虚拟 S2）
-    left_bottom = _virtual_grid(s, LEFTX, 6.30, n, vm, virtual_cells(
+    left_bottom = _virtual_grid(s, LEFTX, 5.95, n, vm, virtual_cells(
         ix.KIND_LEFT_UP_CAUSAL, shape, mr, {}), lane_set=LANE_SET,
-        cell_w=0.62, cell_h=0.46, shade_count=n_max)
+        cell_w=0.64, cell_h=0.60, shade_count=n_max, label_size=10.0)
 
     def spec_percore(w):
         head, rows = lane_column_rows(ix.KIND_LEFT_UP_CAUSAL, shape, mr, {})
@@ -1112,42 +1112,69 @@ PERF_COLORS = {"v4-det": sd.PERF_SELF, "v4-nd": sd.PERF_SELF_ALT,
 
 
 def draw_perf_page(prs):
-    """性能对比页（可选）：本仓库自身版本 + 与参考仓库（opst）的对比。"""
-    SHAPES, TIMES = PERF_SHAPES, PERF_TIMES
-    series = [(k, v, PERF_COLORS[k]) for k, v in TIMES.items()]
+    """性能对比页（可选）：det-vs-det（跨仓库）与 det-vs-nd（各自仓库的确定性开销）。
+
+    数据：PERF_TIMES（msprof kernel 时间中位数，μs）。
+    """
+    T = PERF_TIMES
+    rep = ["b1_s4096", "b1_s8192", "b4_s4096", "b4_s8192"]
+    idx = [PERF_SHAPES.index(n) for n in rep]
+
+    def ratio(a, b):
+        return [T[a][i] / T[b][i] for i in idx]
 
     s = sd.blank_slide(prs)
-    sd.title(s, "9. 性能对比：BN2S2 确定性实现 vs 基线 vs opst", y=0.62)
+    sd.title(s, "9. 性能对比：确定性 BN2S2 vs 基线 vs opst", y=0.62)
     sd.text(s, 0.73, 1.22,
-            "本仓库自身：v4-det / v4-nd（基线）；参考仓库：opst-det / opst-nd · "
-            "causal BSND H8 D128 · 数据为 msprof kernel 时间（device 侧），非 event record",
+            "本仓库：v4-det / v4-nd（基线）；参考仓库：opst-det / opst-nd · "
+            "causal BSND H8 D128 · 核时为 msprof kernel 时间（device 侧），非 event record",
             w=15.2, h=0.30, size=14.5, color=sd.BODY_TEXT)
 
-    # 上：相对吞吐柱状图（按 shape 归一，opst-det = 1.0）；取 4 个代表 shape
-    bars = [i for i, n in enumerate(SHAPES)
-            if n in ("b1_s4096", "b1_s8192", "b4_s4096", "b4_s8192")]
-    groups = [SHAPES[i] for i in bars]
-    rel = [(k, [TIMES["opst-det"][i] / TIMES[k][i] for i in bars], PERF_COLORS[k])
-           for k in TIMES]
-    sd.perf_bars(s, 0.73, 1.68, 15.2, groups, rel, chart_h=4.50,
-                 ylabel="相对吞吐（opst-det = 1.0，>1 更快）",
-                 note="核时取倒数、按 shape 归一；核时来源：msprof Task Duration 中位数")
+    # 上：matplotlib 渲染的两张对比图（贴图，比原生柱状图精细）
+    panels = [
+        dict(title="Determinism cost (det / nd kernel time, >1 = det slower)",
+             groups=rep,
+             series=[("ours (v4)", ratio("v4-det", "v4-nd"), sd.PERF_SELF),
+                     ("opst", ratio("opst-det", "opst-nd"), sd.PERF_REF)],
+             ylabel="ratio", best=0, value_fmt="{:.2f}"),
+        dict(title="Det vs det (opst-det / ours-det kernel time, >1 = ours faster)",
+             groups=rep,
+             series=[("ours v4-det", ratio("opst-det", "v4-det"), sd.PERF_SELF)],
+             ylabel="ratio", best=0, ref=1.0, value_fmt="{:.2f}"),
+    ]
+    sd.perf_figure(s, 0.73, 1.68, 15.2, 3.85, panels,
+                   note="核时取自 msprof Task Duration 中位数；倍率由核时相除得到"
+                        "（profiling 口径，非 event record；图内文字用英文以避开字体缺字）")
 
-    # 下：核时表（全部 8 个 shape）
-    sd.perf_table(s, 0.73, 6.78, SHAPES, series, header="核时 (μs)",
-                  first_col_w=1.35, col_w=1.00, size=11.5, row_h=0.40,
+    # 下：核时 + 三种对比比值的表（字体放大到 12.5）
+    def div(a, b):
+        return [x / y for x, y in zip(T[a], T[b])]
+
+    series = [
+        ("本仓库 det 核时 (μs)", T["v4-det"]),
+        ("本仓库 nd 核时 (μs)", T["v4-nd"]),
+        ("opst det 核时 (μs)", T["opst-det"]),
+        ("opst nd 核时 (μs)", T["opst-nd"]),
+        ("本仓库 det/nd 开销 (×)", div("v4-det", "v4-nd")),
+        ("opst det/nd 开销 (×)", div("opst-det", "opst-nd")),
+        ("det 对比 opst/本仓库 (×)", div("opst-det", "v4-det")),
+    ]
+    sd.perf_table(s, 0.73, 5.95, PERF_SHAPES, series, header="核时 (μs)",
+                  first_col_w=1.95, col_w=1.05, size=12.5, row_h=0.40,
+                  fmts=["{:.1f}"] * 4 + ["{:.2f}"] * 3, best_rows=(0, 1, 2, 3),
                   highlight=(0, 1),
                   note="profiling 核时（msprof Task Duration 中位数，device 侧），"
                        "非 event record 端到端计时")
-    # 右栏：结论面板，补白并说明两个对比范围
-    sd.panel(s, 10.60, 6.78, "这张图怎么读", ("对比范围", "结论"), [
-        ("本仓库自身", "v4-det 相比 v4-nd 的核时开销\n**1.05–1.39×**，大 shape 更小"),
-        ("vs 参考仓库", "小/中 shape opst 快 1.35–1.55×；\n大 shape v4 核时反超 **3–18%**"),
-        ("口径", "det / nd 都取 profiling 核时，\n不与 event record 混用"),
-    ], col_w=(1.35, 3.60), row_h=0.62, size=11.5)
+    # 右栏：三个对比怎么读
+    sd.panel(s, 11.30, 5.95, "三个对比怎么读", ("对比", "结论"), [
+        ("det vs det", "opst-det / 本仓库-det：大 shape **>1**\n（本仓库更快），小 shape <1"),
+        ("本仓库确定性开销", "det / nd：**1.05–1.22×**，\n大 shape 开销更小"),
+        ("opst 确定性开销", "det / nd：1.11–1.98×，\n比本仓库高不少"),
+    ], col_w=(1.50, 3.20), row_h=0.62, size=11.5)
     sd.note(s, 0.73, 11.15,
-            "结论：确定性 BN2S2 的开销随 shape 增大而收敛 —— 大 shape 核时反超 opst，"
-            "小 shape 仍是 opst 更快；非确定路径差距是分支既有问题，与本重构无关。",
+            "结论：确定性 BN2S2 的开销随 shape 增大而收敛（大 shape 核时反超 opst、"
+            "确定性损失也更小）；小 shape 仍是 opst 更快。非确定路径差距是分支既有问题，"
+            "与本重构无关。",
             w=15.2, h=0.52)
     return s
 

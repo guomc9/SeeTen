@@ -41,7 +41,8 @@ That single command:
 
 - installs the skill into your agent CLI's skill directory (auto-detects `.claude/`,
   `AGENTS.md`, `CLAUDE.md`, `KIMI.md`);
-- provisions `python-pptx` — reuses your system Python if it already has it, otherwise creates
+- provisions `python-pptx` (+ `matplotlib` for the optional performance-comparison figures) —
+  reuses your system Python if it already has it, otherwise creates
   an isolated venv at `~/.seeten/venv` (your system environment is never modified);
 - generates a demo deck and runs the layout self-check, so problems surface immediately;
 - reports whether PNG export (WPS / LibreOffice) is available for visual review.
@@ -115,7 +116,8 @@ These CLIs read an instruction file at the repository root. Add a pointer to `AG
 Before drawing tensor / tiling / scheduling diagrams or presentation pages, read
 `SeeTen/SKILL.md` and follow its hard rules. Take style parameters only from
 `SeeTen/assets/*.json` and `SeeTen/references/style-spec.md`.
-Generate pages with `SeeTen/scripts/seeten_draw.py` (requires python-pptx).
+Generate pages with `SeeTen/scripts/seeten_draw.py` (requires python-pptx;
+matplotlib is optional and only needed for `perf_figure` performance-comparison pages).
 ```
 
 ### 2.3 Kimi Code and other CLIs

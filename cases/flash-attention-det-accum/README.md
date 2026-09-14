@@ -28,7 +28,7 @@ construction.
 | Rule-selection table | Dense Swizzle vs Dense Index compared by which axis the low task-id digit walks, and when to pick each |
 | Fill whitespace with real tables | Comparison table (which rule applies to this shape), cost numbers, per-core column list; placed by priority into whichever column has room |
 | Ownership labels hug their table | `B=1`, `N2=1`, `G=1` span only their own grid and sit right on top of it |
-| Performance comparison page (optional) | Kernel-time table (msprof, not event record) for both comparison scopes — this repo's own versions and vs the reference repo (opst) — plus a relative-throughput bar chart in the DeepSeek palette |
+| Performance comparison page (optional) | Kernel-time table (msprof, not event record) split into det-vs-det (ours vs opst) and determinism cost (det/nd per repo), plus two matplotlib figures rendered with the DeepSeek palette |
 
 ## Files
 
