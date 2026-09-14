@@ -1392,10 +1392,12 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
 
     panels : [dict(title=..., groups=[...], series=[(标签, [值, ...][, 颜色]) ...],
                    ylabel=..., value_fmt="{:.2f}", best=0, ref=None,
-                   split=None, split_lo=None), ...]
+                   split=None, split_lo=None, bar_w=None), ...]
              —— 每个 dict 一个子图；best = 用斜纹加粗强调的系列号；
              ref = 参考虚线值（如 1.0）；split = 按阈值逐柱上色（≥split 主色、
-             否则 split_lo，默认灰）—— 用于"比值 < 1 标灰"这类好坏分侧。
+             否则 split_lo，默认灰）—— 用于"比值 < 1 标灰"这类好坏分侧；
+             bar_w = 单柱占组槽的宽度比例（缺省 0.80/系列数；单系列图建议 0.4–0.5，
+             柱子细一点更透气）。
     font   : matplotlib 字体族。缺省 DejaVu Sans —— 没有 CJK 字体时请把图内文字写成
              英文，中文说明留在页面文字 / 表格里。
     返回底边 y（含 note）。依赖 matplotlib（可选依赖；缺了请退回 perf_bars）。
@@ -1417,7 +1419,7 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
     for ax, p in zip(axes, panels):
         groups, series = p["groups"], p["series"]
         n_g, n_s = len(groups), len(series)
-        width = 0.80 / n_s
+        width = p.get("bar_w") or (0.80 / n_s)
         best = p.get("best", 0)
         xv = list(range(n_g))
         vmax = 0.0
