@@ -881,6 +881,55 @@ def check_cells(prs: Presentation, pad=0.06):
     return out
 
 
+def _norm_cell(s: str) -> str:
+    return " ".join(str(s).split())
+
+
+def read_task_matrices(prs: Presentation):
+    """回读全部「轮 \\ 核」任务矩阵。
+
+    返回 {slide_index(1-based): [[cell_text, ...], ...]}（换行折成空格）。
+    用于把页面矩阵与算法函数输出逐格对照 —— case 的 `check_case.py` 就是这么验的。
+    """
+    out = {}
+    for i, slide in enumerate(prs.slides, 1):
+        for shp in slide.shapes:
+            if not (getattr(shp, "has_table", False) and shp.has_table):
+                continue
+            tbl = shp.table
+            if _norm_cell(tbl.cell(0, 0).text).replace(" ", "") != "轮\\核":
+                continue
+            out[i] = [[_norm_cell(tbl.cell(r, c).text)
+                       for c in range(len(tbl.columns))]
+                      for r in range(len(tbl.rows))]
+    return out
+
+
+def check_task_matrices(prs: Presentation, expected) -> list:
+    """把 expected（{slide: [[cell, ...], ...]}）与页面任务矩阵逐格比对。
+
+    空串 / None 的期望格表示允许为空（idle 槽）。返回
+    [(slide, row, col, expected, got), ...]，空列表 = 全部一致。
+    """
+    actual = read_task_matrices(prs)
+    out = []
+    for sl, exp in expected.items():
+        got = actual.get(sl)
+        if got is None:
+            out.append((sl, -1, -1, "<matrix not found>", ""))
+            continue
+        for r, erow in enumerate(exp):
+            for c, e in enumerate(erow):
+                if e is None or str(e) == "":
+                    continue
+                if r >= len(got) or c >= len(got[r]):
+                    out.append((sl, r, c, _norm_cell(e), "<missing>"))
+                    continue
+                if _norm_cell(e) != got[r][c]:
+                    out.append((sl, r, c, _norm_cell(e), got[r][c]))
+    return out
+
+
 def check_layout(prs: Presentation, slide_index=None):
     """排版硬检查：任何文字/表格越过版心都算错误。
 

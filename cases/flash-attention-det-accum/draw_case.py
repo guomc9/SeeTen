@@ -50,7 +50,8 @@ META = {
     ix.KIND_CAUSAL_SWIZZLE: dict(
         en="Causal Swizzle", cn="因果折叠", low=lambda s, kw: "S2（fold 后）",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "是，方形"),
-                            ("头型", "MHA (g=1)"), ("buffer", "2 个 (parity)")],
+                            ("头型", "MHA (g=1)"), ("buffer", "2 个 (parity)"),
+                            ("可达性", "↪ 仅 Left-Up 内部委托")],
         why=["fold 把两个相邻 batch 的三角拼成一个 **m x (n+1) 的满矩形**，task id 在矩形里照排；",
              "奇数列用 parity-0、偶数列用 parity-1 buffer → 一条核在两个 batch 间来回切。",
              "矩形是满的 → **没有 idle、也不用打 mask**。"]),
@@ -61,19 +62,20 @@ META = {
                             ("causal", "是，S1 = S2" if s.M() <= s.N() else "是，S1 > S2"),
                             ("头型", "MHA (g=1)"),
                             ("S1 = S2 时", "委托方形折叠" if s.M() <= s.N() else "用左上几何"),
-                            ("buffer", "2 个 (parity)")],
+                            ("buffer", "2 个 (parity)"),
+                            ("可达性", "★ 偶 batch 且 S1 = S2")],
         why=lambda s, kw: (
             ["本例 S1 = S2（m <= n）→ **直接委托给方形折叠**，不启用左上几何；",
              "所以分派结果和 4 节完全一样：**虚拟宽 = n+1**、零 idle、不用打 mask。"]
             if s.M() <= s.N() else
-            ["S1 比 S2 长时换一套几何：**虚拟高 = 2m-n+1**，每列只有 m 行有活；",
-             "多出来的行是 idle；因果区外的块由 mask 打掉（贡献精确 0）。"])),
+            ["S1 比 S2 长时换一套几何：**虚拟高 = 2m-n+1**，多出来的行装配对 batch 的镜像格；",
+             "整个虚拟矩形都派活 —— 零 idle，也不用打 mask（该分支生产选择器不会选，见 5b 页）。"])),
     ix.KIND_GQA_DENSE: dict(
         en="GQA Dense", cn="任务切片", low=lambda s, kw: "S2（切片）",
         tags=lambda s, kw: [("layout", "BSND"), ("causal", "跟随 epilogue mask"),
                             ("头型", "GQA (g>1)"), ("dk/dV", "共享 workspace")],
-        why=["一个 KV head 对应 g 个 Q head → 一条 KV 列横跨多条核，**没法列私有**；",
-             "改按**连续 task id 切片**分核，靠 gcd 修正让同轮各核的 (B,N2,G,S1) 互不相同。"]),
+        why=["一个 KV head 对应 g 个 Q head → 同一 KV 列的 g 份贡献**不保证同核**；",
+             "（R 与 g 非整除或 gcd 修正时会分裂）→ 切片分核 + 共享 workspace 的轮序 atomic add。"]),
     ix.KIND_TND_DENSE: dict(
         en="TND Dense Swizzle", cn="逐批列私有", low=lambda s, kw: "本批 S2 列",
         tags=lambda s, kw: [("layout", "TND (变长)"), ("causal", "否"),
@@ -120,7 +122,7 @@ def page_text(kind, shape, mr, kw):
                     "    task id = ((r-1) / m) * k + j        # 1 起算",
                     "    第几批 = task id % b，得 0 时取 b     # 低位先走 B（与上一页相反）",
                     "    第几列 = ceil(task id / b)",
-                    "    第几行 = ((第几列 % m) + (r % m) - 1) % m",
+                    "    第几行 = ((第几列-1) % m + (r-1) % m) % m + 1",
                     "    输出: B, N2, G, S1=第几行, S2=第几列"],
             key="低位走批：同一轮里各核分属不同 batch，多出来的核用 batch 维度消化 —— 所以核数可以超过 S1 块数。",
             ex_sub="同一个块集（2 batch x 2x2 块）换成本页规则，只用 2 轮就铺满",
@@ -137,7 +139,8 @@ def page_text(kind, shape, mr, kw):
                     "    如果 虚拟行 >= 虚拟列+1:  # 右上三角",
                     "        batch = 2*虚拟批; 行 = m+1-虚拟行; 列 = 2n-m-虚拟列+2",
                     "    否则: batch = 2*虚拟批-1   # 左下三角，行列照抄"],
-            key="两个三角正好拼成一个 m 行 n+1 列的满矩形：没有 idle 槽位、也不用打 mask。",
+            key="两个三角正好拼成一个 m 行 n+1 列的满矩形：没有 idle 槽位、也不用打 mask。"
+                "（它只作 Left-Up 的内部委托，不单独被选中）",
             ex_sub="先看下面的虚拟矩形（两个三角拼成的满矩形），再对照上面两张真实的块图",
             read=["同一个格子在两张真实图上各出现一次（颜色不同 = batch 不同）。",
                   "**灰格 = causal 区外**（打 mask，不参与累加）；一条 core 在两个 batch 间来回切 → 每核要**两个累加 buffer**。"])
@@ -163,16 +166,17 @@ def page_text(kind, shape, mr, kw):
                      "    如果 虚拟行 <= 可用行数: 奇数 batch, 行 = 虚拟列+虚拟行-1, 列 = 虚拟列",
                      "    否则:                  偶数 batch, 行 = m-(虚拟行-可用行数)+1, 列 = n-虚拟列+1"]),
             key=("S1 = S2 时它不做自己的几何：**直接委托给方形折叠**，结果与 4 节一致。"
+                 "（选择器：偶 batch 且 S1 = S2 才选它）"
                  if square else
-                 "虚拟矩形比真实 causal 区大：多出来的轮次是 idle，靠 mask 打掉。"),
+                 "折叠几何只覆盖 causal 区：虚拟矩形里都派活、零 idle，也不用 mask。"),
             ex_sub=("形状与 4 节相同（S1 = S2），因为这一支就是委托方形折叠 —— 对照两页可以确认结果一致"
                     if square else
-                    f"虚拟高 {2 * m - n + 1} 行里，每列只有 {m} 行有活；灰格是凑不满的部分"),
+                    f"虚拟高 = 2m-n+1 = {2 * m - n + 1} 行：多出来的行装配对 batch 的镜像格"),
             read=(["**同一个 (B, S1, S2) 集合**，与 4 节的例子逐格相同 —— 委托就是这条路。",
                    "区别只在调度器怎么选：S1 = S2 时它可能落到这条规则上，再走进方形折叠。"]
                   if square else
-                  ["**红格 = idle**（本轮该核没任务）；**灰格 = causal 区外**、要靠 mask 的块。",
-                   f"虚拟高 = 2m-n+1 = {2 * m - n + 1}：比真实 causal 区高，多出来的行只能空转。"]))
+                  ["折叠矩形里没有 idle 槽、也不用 mask；多出来的行不是空转，装配对 batch 的镜像格。",
+                   f"虚拟高 = 2m-n+1 = {2 * m - n + 1}：正好装下两个 batch 的 causal 区。"]))
     if kind == ix.KIND_GQA_DENSE:
         return dict(
             sub=f"输入：core 数 {k} · S1 分 {m} 块 · S2 分 {n} 块 · batch {b} · GQA g={g}",
@@ -184,12 +188,13 @@ def page_text(kind, shape, mr, kw):
                     "    第几列 = ceil(task id / (b*g))",
                     "    第几组 = task id % g，得 0 时取 g",
                     "    起点偏移 = ceil( (第几列 % (t1*m) 或取满) / t1 ),  t1 = R/gcd(b*g, R)",
-                    "    第几行 = (轮内序号 + 起点偏移 - 1) % m"],
-            key="一条 KV 列横跨多条核，没法列私有 —— 改用共享 workspace 的轮序 atomic add，"
-                "确定性靠“同轮各核的 (B,N2,G,S1) 互不相同”。",
+                    "    第几行 = (轮内序号 + 起点偏移 - 1) % m",
+                    "    若 t1*m < n: 还要一步 ID 重排修正（本例不触发）"],
+            key="同一 KV 列的 g 份贡献**不保证同核**（R 与 g 非整除、或 gcd 修正时会分裂）"
+                "→ 不依赖列私有，改用共享 workspace 的轮序 atomic add。",
             ex_sub="同一个 (S1,S2) 格上叠着两个 G 的任务，所以按 G 拆成两张图",
             read=["同一格上两个 G 的任务分两行写；颜色仍是 batch、深浅仍是 KV 列。",
-                  "G1 / G2 **交替落位**，避免同轮抢同一个 S1。"])
+                  "本例两条列恰好各自单核；**跨核时不保证列私有** → 共享 workspace 按轮序累加。"])
     if kind == ix.KIND_TND_DENSE:
         q, kk = rag()
         return dict(
@@ -224,8 +229,14 @@ def page_text(kind, shape, mr, kw):
                     f"总轮数 = max(ceil(总面积*head数*g/k), 最大S1块数*g, 最大S2块数) = {mr}",
                     "对每个 (round r, core j):",
                     "    全局 task id = (j-1) * 总轮数 + r     # 每条核独占一段，顺序扫",
-                    "    用面积前缀查出它属于哪个 batch;  批内号 = 全局 task id - 该 batch 面积前缀*head数",
-                    "    第几组 = 批内号 换算;  第几行 = 批内号 % m;  第几列 = ceil(批内号 / (m*g))"],
+                    "    用面积前缀查出它属于哪个 batch",
+                    "    批内号 = 全局 task id - 该 batch 面积前缀 * (N2 数 * g)",
+                    "    片号   = ceil(批内号 / (m*n*g));  N2 = 片号 - 1",
+                    "    片内号 = 批内号 取模 (m*n*g)，得 0 时取满",
+                    "    第几列 = ceil(片内号 / (m*g))",
+                    "    第几组 = ceil( (片内号 取模 (m*g)) / m )",
+                    "    第几行 = (片内号 取模 (m*g)) 取模 m，得 0 时取 m",
+                    "    若 t1 < n: 还有一步 gcd 对齐修正（本例不触发）"],
             key="变长 GQA 无法逐 batch 对齐，直接把整个任务空间展平等分给各核，顺序扫过。",
             ex_sub="面积大的 batch 分到的格子多；每个 (S1,S2) 格上有两个 G 的任务，按 G 拆图",
             read=["四个小块合起来 = 12 个任务，2 条核 x 6 轮扫完，**零 idle**。",
@@ -274,6 +285,11 @@ def dense_choose_rows(kind, shape, mr):
 
 
 def applicability_rows(kind, shape, mr, kw=None):
+    """「同一形状下其它规则能不能用」——条件列与判定谓词同源。
+
+    条件列印规则的要求；不适用时只印**本例不满足的那一条**（含本例值），
+    避免出现"条件成立却写用不上"这种自相矛盾的对比表。
+    """
     kw = kw or {}
     if "cu_q" in kw:              # 变长 batch：S1/S2 块数逐批不同，取最大的那一批来对比
         m = max(batch_mn(shape, kw, b)[0] for b in range(shape.batch))
@@ -282,20 +298,35 @@ def applicability_rows(kind, shape, mr, kw=None):
         m, n = shape.M(), shape.N()
     b, g, k = shape.Bh(), shape.groupNum, shape.coreNum
     causal = kind in (ix.KIND_CAUSAL_SWIZZLE, ix.KIND_LEFT_UP_CAUSAL)
+    even = b % 2 == 0
     cands = [
         (ix.KIND_DENSE_SWIZZLE, "Dense Swizzle",
-         (not causal) and g == 1 and k <= m, f"core 数 {k} ≤ S1 块数 {m}"),
+         [("非 causal", not causal, "本例是 causal"),
+          ("MHA", g == 1, f"本例 g={g}"),
+          ("k ≤ m", k <= m, f"本例 k={k} > m={m}")]),
         (ix.KIND_DENSE_INDEX, "Dense Index",
-         (not causal) and g == 1 and k > m, f"core 数 {k} > S1 块数 {m}"),
-        (ix.KIND_CAUSAL_SWIZZLE, "Causal Swizzle", causal, "causal 形状才用"),
+         [("非 causal", not causal, "本例是 causal"),
+          ("MHA", g == 1, f"本例 g={g}"),
+          ("k > m", k > m, f"本例 k={k} ≤ m={m}")]),
+        (ix.KIND_CAUSAL_SWIZZLE, "Causal Swizzle",
+         [("causal", causal, "本例非 causal"),
+          ("MHA", g == 1, f"本例 g={g}"),
+          ("batch 偶", even, "本例 batch 为奇")]),
         (ix.KIND_LEFT_UP_CAUSAL, "Left-Up Causal",
-         causal and b % 2 == 0 and m == n, "batch 为偶且 S1 = S2"),
-        (ix.KIND_GQA_DENSE, "GQA Dense", g > 1, f"g={g} > 1 才用"),
+         [("causal", causal, "本例非 causal"),
+          ("MHA", g == 1, f"本例 g={g}"),
+          ("batch 偶", even, "本例 batch 为奇"),
+          ("S1=S2", m == n, f"本例 {m} ≠ {n}")]),
+        (ix.KIND_GQA_DENSE, "GQA Dense",
+         [("g > 1", g > 1, f"本例 g={g}")]),
     ]
     rows = []
-    for kk, cn, fits, why in cands:
+    for kk, cn, clauses in cands:
+        fits = all(ok for _, ok, _ in clauses)
+        cond = ("、".join(name for name, ok, _ in clauses if ok) if fits else
+                next(ex for _, ok, ex in clauses if not ok))
         rows.append((cn, "★ 本页" if kk == kind else ("也能用" if fits else "用不上"),
-                     why))
+                     cond))
     return ("规则", "本形状下", "条件"), rows
 
 
@@ -403,7 +434,9 @@ def virtual_column_rows(shape, mr):
                 got[(bb, s2)] = got.get((bb, s2), 0) + 1
         parts = " + ".join(f"{cnt} 格 (B={bb + 1} S2={s2 + 1})"
                            for (bb, s2), cnt in sorted(got.items()))
-        rows.append((f"虚拟列{vc + 1}", parts, str(len(got)), "2"))
+        # 跨两个 batch 的虚拟列才需要两个 parity 累加槽；只落一个 batch 的仍只要一个
+        bufs = len({bb for (bb, s2) in got})
+        rows.append((f"虚拟列{vc + 1}", parts, str(len(got)), str(bufs)))
     return ("一条列", "由哪些格组成", "跨几个 batch", "要几个 buffer"), rows
 
 
@@ -457,18 +490,18 @@ def draw_virtual_page(prs, num):
              col_w=(1.80, 1.70, 1.75), row_h=0.52, size=11.5)
     sd.panel(s, 10.60, 5.90, "虚拟行又是什么", ("虚拟行", "说明"),
              [("折叠矩形里的行", "不是某个 batch 的 S1 行"),
-              ("左上对齐（S1 > S2）", "虚拟高 = 2m-n+1，每列\n只有 m 行有活"),
-              ("多出来的行", "不派活（idle）；落在 causal\n区外的块由 mask 打掉")],
+              ("左上对齐（S1 > S2）", "虚拟高 = 2m-n+1：多出来的\n行装配对 batch 的镜像格"),
+              ("整个虚拟矩形", "都派活、零 idle；折叠只覆盖\ncausal 区，不用 mask")],
              col_w=(2.05, 3.20), row_h=0.52, size=11.5)
     sd.panel(s, 10.60, 8.72, "两条 causal 规则各折成什么", ("规则", "折叠出来的矩形"),
              [("Causal Swizzle（S1 = S2）", "虚拟宽 = n+1：两个三角正好\n凑满，没有 idle"),
-              ("Left-Up Causal（S1 > S2）", "虚拟高 = 2m-n+1：多出来的\n行是 idle")],
+              ("Left-Up Causal（S1 > S2）", "虚拟高 = 2m-n+1：多出来的\n行是镜像格，同样零 idle")],
              col_w=(2.35, 2.90), row_h=0.58, size=11.5)
 
     sd.note(s, 0.73, 10.32,
             "虚拟列是折叠的产物：核按虚拟列分派，同一列的格子可能落在两个 batch 上。",
             w=9.70, h=0.36)
-    sd.text(s, 0.73, 11.08, "· 普通列只属于一个 batch；虚拟列可以**横跨两个 batch** —— 守它的 core 要两个累加 buffer。",
+    sd.text(s, 0.73, 11.08, "· 普通列只属于一个 batch；跨两个 batch 的虚拟列要**两个累加 buffer**（只跨一个的仍只要一个）。",
             w=9.70, h=0.32, size=15, color=sd.BODY_TEXT)
     sd.text(s, 0.73, 11.44, "· 折回真实坐标时**行列会翻转**（右上那片三角），所以格内写它最终落到哪一块。",
             w=9.70, h=0.32, size=15, color=sd.BODY_TEXT)
@@ -492,7 +525,7 @@ def repeat_rows(shape):
     rows = [("同一个 S2 在多条 core", "低位走 S2 列 → **跨轮、跨 batch** 会重复"),
             ("同一个 S1 在多条 core", "列内逐行走 S1 → 每条列都要走一遍 S1")]
     if gqa:
-        rows += [("一条 KV 列横跨多条 core", "一条列要服务 g 个 Q head，**只能切片**"),
+        rows += [("一条 KV 列的 g 份贡献", "不保证同核 → 共享 workspace"),
                  ("同一个 (S2,S1) 只出现一次", "双射：每个块只被派一次")]
     else:
         rows += [("同一个 (S2,S1) 只派一次", "**双射**：每个块只被派一次"),
@@ -614,6 +647,8 @@ def draw_overview(prs):
     sd.note(s, 0.73, 7.00,
             "所有规则都是纯算术：(round, core) 一确定，结果就唯一 —— 这就是确定性的来源。",
             w=15.2, h=0.36)
+    sd.text(s, 0.73, 7.40, "causal 列 = 本页例子是否 causal；GQA / TND-GQA 的 causal 由 epilogue mask 处理。",
+            w=9.90, h=0.28, size=13, color=sd.BODY_TEXT)
     sd.text(s, 0.73, 7.72, "怎么读后面的例子", w=13.0, h=0.34, size=18, bold=True)
     for i, line in enumerate([
             "· 第 1 页先认公用的轴遍历顺序 b → n2 → s2 → s1 → d，以及 dS 的一列怎么变成 dK/dV 的一行。",
@@ -633,7 +668,7 @@ def draw_overview(prs):
               ("列私有", "swizzle 类：一条列只归一条 core")],
              col_w=(1.85, 3.40), row_h=0.52, size=12.5)
     sd.panel(s, 10.60, 8.44, "七种规则归成三条路线", ("路线", "用它的规则"),
-             [("列私有", "1 Dense Swizzle、3/4 Causal、6 TND"),
+             [("列私有", "1 Dense Swizzle、4 Left-Up、6 TND"),
               ("切片 + gcd 修正", "5 GQA Dense（核数不受 S1 块数限制）"),
               ("按面积展平", "7 TND GQA（变长 batch，不分列）")],
              col_w=(1.75, 3.50), row_h=0.52, size=12.5)
@@ -841,6 +876,11 @@ def draw_leftup_big_page(prs, num):
     sd.text(s, 0.73, 1.22,
             f"上一页 S1 = S2，走的是委托的方形折叠；这一页 S1 > S2，才是它自己的几何：虚拟高 = 2m-n+1 = {vm}。",
             w=15.2, h=0.30, size=16, color=sd.BODY_TEXT)
+    for i, line in enumerate(["⚠ 选择器不会走这一支：",
+                              "S1 > S2 的 causal 用 dense + mask；",
+                              "本页只解释该算法的几何。"]):
+        sd.text(s, 10.60, 1.22 + i * 0.30, line, w=5.40, h=0.28, size=13.5,
+                color=sd.EMPH_COLOR)
     # 左栏：两个 batch 的真实覆盖图（阶梯状 = causal 区）
     cell, gy = 0.62, 2.60
     for bb in range(b):

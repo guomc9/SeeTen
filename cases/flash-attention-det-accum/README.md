@@ -35,11 +35,13 @@ construction.
 |---|---|
 | `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
 | `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
+| `check_case.py` | Content self-check: matrix readback vs algorithms, printed-formula replay, claim cross-checks |
 | `out/v4-index-schedules.pptx` | The generated pages (18: overview + axis walkthrough + virtual-column page + 7 methods x 2 + a harder non-square causal example) |
 
 ```bash
 python index_schedules.py          # check the seven algorithms first (expect zero conflicts)
 python draw_case.py out/v4-index-schedules.pptx   # generate the pages
+python check_case.py out/v4-index-schedules.pptx  # matrix + formula + claim self-check
 ```
 
 ## The seven index algorithms
@@ -75,10 +77,16 @@ keys instead. That is a design choice, not a defect.
 
 ## Known pitfalls
 
+- **Algorithm 3 (Causal Swizzle) is never selected directly** — it is only an internal delegate
+  of algorithm 4 (Left-Up), which itself is only selected when the batch count is even and
+  S1 = S2. The pages carry a reachability tag (`↪ 仅 Left-Up 内部委托` / `★ 偶 batch 且 S1 = S2`).
 - For algorithm 4 (left-up causal folding), the `m > n` branch is **never selected by the
-  current selector** — it is only chosen when S1 = S2, and that path delegates to algorithm 3.
-  Page 5 is that delegation case; page 5b shows the `m > n` geometry explicitly. Both are drawn
-  from real runs of the algorithm, but only the S1 = S2 path is reachable through the selector.
+  current selector**: page 5b draws its geometry, and the page explicitly says so
+  (`⚠ 选择器不会走这一支`). Only the S1 = S2 path is reachable.
+- **GQA column splitting is conditional, not guaranteed.** Whether the g contributions of one
+  KV column (`b, n2, s2`) land on the same core depends on `R` vs `g` alignment (and on the
+  gcd correction). The 2-core example happens to be single-core per column, so the pages say
+  "not guaranteed to share a core" instead of "always spans cores".
 - Shortcuts such as "skip the reduction when only one tile contributes" **do not exist** in the
   reference implementation (it always goes seed → reduce → single atomic add). Don't copy an
   imagined optimization into a diagram.
