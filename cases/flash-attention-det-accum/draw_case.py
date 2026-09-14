@@ -1121,12 +1121,38 @@ def _ratio(num, den):
     return [a / b if (a and b) else None for a, b in zip(num, den)]
 
 
-def _idx(layout):
-    return [i for i, c in enumerate(pm.CASES) if c[1] == layout]
+def _size_class(name):
+    """按 case 名的语义分小 / 中 / 大（与测试矩阵命名一致）。"""
+    if name.startswith("bsnd"):
+        if "small" in name or "tiny" in name:
+            return "小"
+        if "mid" in name:
+            return "中"
+        return "大"          # long / large
+    if "small" in name or "ragged" in name:
+        return "小"
+    if "eq" in name or "pack8" in name:
+        return "中"
+    return "大"              # large
 
 
-def _split_by_layout(vals):
-    return [[vals[i] for i in _idx(lay)] for lay in ("BSND", "TND")]
+SIZES = ("小", "中", "大")
+# matplotlib 默认字体没有 CJK 字形：图内标题用 ASCII，页面表格/文字用中文
+SZ_EN = {"小": "small", "中": "mid", "大": "large"}
+GROUP_COLS = tuple(f"{lay} {sz}" for lay in ("BSND", "TND") for sz in SIZES)
+
+
+def _group_idx(lay, sz):
+    return [i for i, (n, l, _) in enumerate(pm.CASES)
+            if l == lay and _size_class(n) == sz]
+
+
+def _layout_idx(lay):
+    return [i for i, c in enumerate(pm.CASES) if c[1] == lay]
+
+
+def _group_vals(vals, lay, sz):
+    return [vals[i] for i in _group_idx(lay, sz)]
 
 
 def _rate(vals, th=0.8):
@@ -1134,53 +1160,61 @@ def _rate(vals, th=0.8):
     return sum(1 for v in xs if v >= th) / len(xs) if xs else 0.0
 
 
-def _stat_rows(series_specs, th=0.8):
-    """统计表行：每个 series 一行几何平均（+ 达标率）。"""
+def _extreme(vals, mode):
+    xs = [v for v in vals if v is not None]
+    if not xs:
+        return float("nan")
+    return min(xs) if mode == "min" else max(xs)
+
+
+def _stat_rows(series_specs):
+    """统计表行：每个 series 一行几何平均（表列 = 6 个 size 组）。"""
     rows = []
     for label, vals, _c in series_specs:
-        by = _split_by_layout(vals)
-        allv = [v for v in vals if v is not None]
-        rows.append((f"{label} 几何平均", [_gm(x) for x in by] + [_gm(allv)],
+        rows.append((f"{label} 几何平均",
+                     [_gm(_group_vals(vals, lay, sz))
+                      for lay in ("BSND", "TND") for sz in SIZES],
                      "{:.2f}"))
     return rows
 
 
 def draw_perf_ratio_page(prs, num, title, sub, series_specs, fig_note,
                          table_header, table_rows, read_rows, key,
-                         split=0.8, ref=0.8, ymax=None):
-    """一张比值型性能页：BSND/TND 两个子图（横轴 = 该 layout 全部 case） +
-    统计表 + 读法 + 结论。series_specs = [(label, ratio_list, color), ...]。"""
+                         split=0.8, ref=0.8):
+    """一张比值型性能页：2x3 子图（BSND/TND x 小/中/大）+ 6 列统计表 + 结论。"""
     s = sd.blank_slide(prs)
     sd.title(s, f"{num}. {title}", y=0.62)
     sd.text(s, 0.73, 1.22, sub, w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
     panels = []
-    for pi, lay in enumerate(("BSND", "TND")):
-        idx = _idx(lay)
+    for gi, (lay, sz) in enumerate(
+            [(lay, sz) for lay in ("BSND", "TND") for sz in SIZES]):
+        idx = _group_idx(lay, sz)
         series = [(label, [vals[i] if vals[i] is not None else 0.0 for i in idx],
                    color) for label, vals, color in series_specs]
         panels.append(dict(
-            title=f"{' / '.join(x[0] for x in series_specs)} · "
-                  f"{lay}（{len(idx)} case）",
+            title=f"{lay} {SZ_EN[sz]} ({len(idx)})",
             groups=[pm.CASES[i][2] for i in idx],
             series=series,
-            ylabel="ratio", ref=ref, split=split if len(series) == 1 else None,
-            bar_w=0.62 if len(series) == 1 else 0.42,
+            ylabel="ratio", ref=ref,
+            split=split if len(series) == 1 else None,
+            bar_w=0.62 if len(series) == 1 else 0.40,
             xrot=90, show_values=False,
-            ymax=ymax if pi == 0 else None))
-    fig_h = 4.55
-    sd.perf_figure(s, 0.73, 1.68, 15.2, fig_h, panels, note=fig_note)
-    ty = 1.68 + fig_h + 0.40 + 0.20
-    # series_specs 的 label 用于统计表首列；首列宽按最长标签留足
-    sd.perf_table(s, 0.73, ty, ("BSND", "TND", "全体"),
+            legend=(gi % 3 == 0)))
+    fig_h = 5.85
+    sd.perf_figure(s, 0.73, 1.66, 15.2, fig_h, panels, note=fig_note, ncols=3)
+    ty = 1.66 + fig_h + 0.40 + 0.16
+    nrows = len(table_rows) + 1
+    sd.perf_table(s, 0.73, ty, GROUP_COLS,
                   [(r[0], r[1]) for r in table_rows],
-                  header=table_header, first_col_w=3.30, col_w=1.25,
-                  size=11.5, row_h=0.40,
+                  header=table_header, first_col_w=2.90, col_w=1.06,
+                  size=11.0, row_h=0.42,
                   fmts=[r[2] for r in table_rows],
-                  note=None)
+                  best=None, note=None)
     if read_rows:
-        sd.panel(s, 12.05, ty, "怎么读", ("看什么", "结论"), read_rows,
-                 col_w=(1.10, 2.55), row_h=0.50, size=10.5)
-    sd.note(s, 0.73, 11.24, key, w=11.1, h=0.50, size=11.0)
+        sd.panel(s, 11.35, ty, "怎么读", ("看什么", "结论"), read_rows,
+                 col_w=(1.45, 2.00), row_h=0.50, size=10.5)
+    sd.note(s, 0.73, min(ty + nrows * 0.42 + 0.30, 10.95), key,
+            w=15.2, h=0.62, size=11.0)
     return s
 
 
@@ -1209,8 +1243,8 @@ def draw_perf_detail_page(prs):
                          f(pm.OPST_DET[i]), f(pm.OPST_ND[i])]))
         return out
 
-    bsnd = _idx("BSND")
-    tnd = _idx("TND")
+    bsnd = _layout_idx("BSND")
+    tnd = _layout_idx("TND")
     blocks = [
         (0.73, 1.72, bsnd[:11]), (8.05, 1.72, bsnd[11:]),
         (0.73, 6.48, tnd[:8]), (8.05, 6.48, tnd[8:]),
@@ -1228,7 +1262,11 @@ def draw_perf_detail_page(prs):
 
 
 def draw_perf_pages(prs):
-    """性能对比 4 页：确定性开销 / det-vs-det / nd-vs-nd / 全矩阵明细。"""
+    """性能对比 4 页：确定性开销 / det-vs-det / nd-vs-nd / 全矩阵明细。
+
+    每页横轴 = BSND/TND x 小/中/大 六个 size 组（表格列同口径），
+    图内文字全 ASCII（matplotlib 无 CJK 字体，全角括号会乱码）。
+    """
     od, ond = pm.OURS_DET, pm.OURS_ND
     pd, pnd = pm.OPST_DET, pm.OPST_ND
     pen_ours = _ratio(od, ond)
@@ -1236,71 +1274,77 @@ def draw_perf_pages(prs):
     det_ratio = _ratio(pd, od)          # opst-det / ours-det
     nd_ratio = _ratio(pnd, ond)         # opst-nd / ours-nd
 
+    def rows_gm(specs, extra=()):
+        return _stat_rows(specs) + list(extra)
+
     # ---- 9.1 确定性开销 ----
     specs = [("ours det/nd", pen_ours, sd.PERF_SELF),
              ("opst det/nd", pen_opst, sd.PERF_REF)]
-    rows = _stat_rows(specs)
+    rows = rows_gm(specs, [
+        ("ours 最差组",
+         [_extreme(_group_vals(pen_ours, lay, sz), "max")
+          for lay in ("BSND", "TND") for sz in SIZES], "{:.2f}")])
     gm_o = _gm([v for v in pen_ours if v is not None])
     gm_p = _gm([v for v in pen_opst if v is not None])
     draw_perf_ratio_page(
         prs, "9.1", "性能对比：确定性开销（det / nd 核时倍率）",
-        "倍率 = det 核时 / nd 核时（> 1 = det 更慢）· 全矩阵 36 case（BSND 21 + TND 15）· "
+        "倍率 = det 核时 / nd 核时（> 1 = det 更慢）· 36 case 按 BSND/TND x 小/中/大 分组 · "
         "msprof kernel 时间（device 侧），非 event record",
         specs,
-        "核时取自 msprof Task Duration 最小值；倍率 = det / nd；虚线 = 1.0（无开销）",
+        "核时取自 msprof Task Duration 最小值；倍率 = det / nd；虚线 = 1.0（无开销）；"
+        "图内文字为全 ASCII（matplotlib 无 CJK 字体）",
         "det/nd 开销 (×)", rows,
-        [("倍率 > 1", "确定性有开销（劣化）"),
-         ("ours 几何平均", f"**{gm_o:.2f}×**（全矩阵）"),
-         ("opst 几何平均", f"{gm_p:.2f}×（全矩阵）")],
-        f"结论：本仓库 det/nd 几何平均 {gm_o:.2f}×（opst {gm_p:.2f}×）；全矩阵 "
-        f"{_rate([v for v in pen_ours if v is not None], 1.0):.0%} 的 case det 变慢，"
-        "确定性代价普遍存在；BSND 侧本仓库更小。",
-        ref=1.0, split=1.0, ymax=None)
+        [("倍率 > 1", "确定性有开销"),
+         ("ours / opst", f"{gm_o:.2f}× / {gm_p:.2f}×")],
+        f"结论：本仓库 det/nd 几何平均 {gm_o:.2f}×，opst {gm_p:.2f}× —— 整体更小；"
+        f"TND 侧差距最大（opst 大 shape 接近 2×），BSND 大 shape 两边相当。",
+        ref=1.0, split=1.0)
 
     # ---- 9.2 det-vs-det ----
-    rows2 = _stat_rows([("opst/ours", det_ratio, sd.PERF_SELF)], th=0.8)
-    rows2.append(("达标 (≥0.8×)", [_rate(x, 0.8) for x in _split_by_layout(det_ratio)]
-                  + [_rate(det_ratio, 0.8)], "{:.0%}"))
+    rows = rows_gm([("opst/ours", det_ratio, sd.PERF_SELF)], [
+        ("达标 (≥0.8×)",
+         [_rate(_group_vals(det_ratio, lay, sz), 0.8)
+          for lay in ("BSND", "TND") for sz in SIZES], "{:.0%}"),
+        ("最差（组内 min）",
+         [_extreme(_group_vals(det_ratio, lay, sz), "min")
+          for lay in ("BSND", "TND") for sz in SIZES], "{:.2f}")])
     gm_d = _gm([v for v in det_ratio if v is not None])
-    lo_d = min((v for v in det_ratio if v is not None), default=0.0)
-    hi_d = max((v for v in det_ratio if v is not None), default=0.0)
     draw_perf_ratio_page(
         prs, "9.2", "性能对比：det-vs-det（opst-det / 本仓库-det）",
-        "同口径确定性实现 · 全矩阵 36 case · 核时为 msprof kernel 时间（device 侧）· "
+        "同口径确定性实现 · 36 case 分组同 9.1 · 核时为 msprof kernel 时间（device 侧）· "
         "比值 ≥ 0.8 = 达标（蓝柱），< 0.8 标灰",
         [("opst-det / ours-det", det_ratio, sd.PERF_SELF)],
         "核时取自 msprof Task Duration 最小值；比值 = opst-det / 本仓库-det；"
-        "虚线 = 0.8（目标线）；< 0.8 的柱标灰 = 本仓库用时超过 opst 的 1.25×",
-        "det 对比 (×)", rows2,
-        [("≥ 0.8", "达标（蓝柱）"),
-         ("< 0.8", "本仓库更慢（灰柱）"),
-         ("几何平均", f"{gm_d:.2f}×（全矩阵）"),
-         ("最差 / 最好", f"{lo_d:.2f}× / {hi_d:.2f}×")],
-        f"结论：det 侧几何平均 {gm_d:.2f}×；达标（≥0.8×）{_rate(det_ratio, 0.8):.0%}（全体）、"
-        f"{_rate(_split_by_layout(det_ratio)[0], 0.8):.0%}（BSND）、"
-        f"{_rate(_split_by_layout(det_ratio)[1], 0.8):.0%}（TND）；差距集中在 GQA causal / 小 shape。")
+        "虚线 = 0.8 目标线；< 0.8 的柱标灰；图内文字为全 ASCII",
+        "det 对比 (×)", rows,
+        [("小 shape", "明显落后（0.4–0.7×）"),
+         ("大 shape", "基本追平（≈1.0×）"),
+         ("几何平均", f"{gm_d:.2f}×（全体）")],
+        f"结论：det 侧几何平均 {gm_d:.2f}×。小 shape 差距最大（固定开销占比高），"
+        "大 shape 已追平；GQA causal 是 det 侧最大的单项缺口。")
 
     # ---- 9.3 nd-vs-nd ----
-    rows3 = _stat_rows([("opst/ours", nd_ratio, sd.PERF_SELF)])
-    rows3.append(("达标 (≥0.8×)", [_rate(x, 0.8) for x in _split_by_layout(nd_ratio)]
-                  + [_rate(nd_ratio, 0.8)], "{:.0%}"))
+    rows = rows_gm([("opst/ours", nd_ratio, sd.PERF_SELF)], [
+        ("达标 (≥0.8×)",
+         [_rate(_group_vals(nd_ratio, lay, sz), 0.8)
+          for lay in ("BSND", "TND") for sz in SIZES], "{:.0%}"),
+        ("最差（组内 min）",
+         [_extreme(_group_vals(nd_ratio, lay, sz), "min")
+          for lay in ("BSND", "TND") for sz in SIZES], "{:.2f}")])
     gm_n = _gm([v for v in nd_ratio if v is not None])
-    lo_n = min((v for v in nd_ratio if v is not None), default=0.0)
-    hi_n = max((v for v in nd_ratio if v is not None), default=0.0)
     draw_perf_ratio_page(
         prs, "9.3", "性能对比：nd-vs-nd（opst-nd / 本仓库-nd）",
-        "非确定性基线流水线对比 · 全矩阵 36 case · 核时为 msprof kernel 时间（device 侧）· "
+        "非确定性基线流水线 · 36 case 分组同 9.1 · 核时为 msprof kernel 时间（device 侧）· "
         "比值 ≥ 0.8 = 达标（蓝柱），< 0.8 标灰",
         [("opst-nd / ours-nd", nd_ratio, sd.PERF_SELF)],
         "核时取自 msprof Task Duration 最小值；比值 = opst-nd / 本仓库-nd；"
-        "虚线 = 0.8；< 0.8 的柱标灰 = 本仓库用时超过 opst 的 1.25×",
-        "nd 对比 (×)", rows3,
-        [("≥ 0.8", "达标（蓝柱）"),
-         ("< 0.8", "本仓库更慢（灰柱）"),
-         ("几何平均", f"{gm_n:.2f}×（全矩阵）"),
-         ("最差 / 最好", f"{lo_n:.2f}× / {hi_n:.2f}×")],
-        f"结论：nd 侧几何平均 {gm_n:.2f}×，达标 {_rate(nd_ratio, 0.8):.0%}；"
-        "nd 差距是分支既有的基础流水线问题，与确定性重构无关（此前已记录）。")
+        "虚线 = 0.8 目标线；< 0.8 的柱标灰；图内文字为全 ASCII",
+        "nd 对比 (×)", rows,
+        [("小 shape", "差距最大（10–30µs）"),
+         ("中/大 shape", "1.1–1.5×（既有问题）"),
+         ("几何平均", f"{gm_n:.2f}×（全体）")],
+        f"结论：nd 侧几何平均 {gm_n:.2f}×；差距是分支既有的基础流水线问题，"
+        "与确定性重构无关（合并目标 cube Optimize 后部分 mid shape 还略有变慢）。")
 
     # ---- 9.4 明细 ----
     draw_perf_detail_page(prs)

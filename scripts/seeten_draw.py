@@ -1391,7 +1391,8 @@ def perf_bars(slide, x, y, w, groups, series, chart_h=3.30, ylabel=None,
     return bottom
 
 
-def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
+def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None,
+                ncols=None):
     """用 matplotlib 渲染性能对比图（推荐），以 PNG 贴进页面。
 
     panels : [dict(title=..., groups=[...], series=[(标签, [值, ...][, 颜色]) ...],
@@ -1407,6 +1408,8 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
              数值交给图下的小表）；value_size = 柱顶数值字号（缺省 7.5）。
     font   : matplotlib 字体族。缺省 DejaVu Sans —— 没有 CJK 字体时请把图内文字写成
              英文，中文说明留在页面文字 / 表格里。
+    ncols  : 子图列数（缺省 = len(panels)，即单行）；>1 时按网格排布，行数
+             = ceil(len(panels)/ncols)。panel 里可加 legend=False 关闭该子图图例。
     返回底边 y（含 note）。依赖 matplotlib（可选依赖；缺了请退回 perf_bars）。
     """
     import io
@@ -1420,9 +1423,12 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
         "axes.edgecolor": "#E3E3E3",
         "text.color": "#" + PERF_AXIS, "axes.labelcolor": "#" + PERF_SUB,
     })
-    fig, axes = plt.subplots(1, len(panels), figsize=(w, h), dpi=dpi)
-    if len(panels) == 1:
-        axes = [axes]
+    ncols = ncols or len(panels)
+    nrows = -(-len(panels) // ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(w, h), dpi=dpi)
+    axes = list(axes.flatten()) if hasattr(axes, "flatten") else [axes]
+    for ax in axes[len(panels):]:
+        ax.axis("off")
     for ax, p in zip(axes, panels):
         groups, series = p["groups"], p["series"]
         n_g, n_s = len(groups), len(series)
@@ -1499,7 +1505,9 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None):
         ax.spines["bottom"].set_color("#" + PERF_AXIS)
         ax.tick_params(axis="both", labelsize=8.0, colors="#" + PERF_SUB,
                        length=3, width=0.7)
-        ax.legend(frameon=False, fontsize=8.5, ncol=min(3, n_s), loc="upper left")
+        if p.get("legend", True):
+            ax.legend(frameon=False, fontsize=8.5, ncol=min(3, n_s),
+                      loc="upper left")
     fig.tight_layout()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, facecolor="white")

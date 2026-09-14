@@ -301,10 +301,12 @@ def main(pptx_path):
     else:
         ok("5b 页已标注选择器不可达")
 
-    # 性能对比页（4 页）：统计表对照 + 明细表逐格 + 口径标注
+    # 性能对比页（4 页）：6 列分组统计表 + 明细表逐格 + 口径标注
     import math as _m
 
     import perf_matrix as pm
+
+    SIZES = ("小", "中", "大")
 
     def _gm(xs):
         xs = [x for x in xs if x is not None and x > 0]
@@ -313,15 +315,19 @@ def main(pptx_path):
     def _ratio(num, den):
         return [a / b if (a and b) else None for a, b in zip(num, den)]
 
-    def _idx(lay):
-        return [i for i, c in enumerate(pm.CASES) if c[1] == lay]
-
-    def _split(vals):
-        return [[vals[i] for i in _idx(lay)] for lay in ("BSND", "TND")]
+    def _gvals(vals, lay, sz):
+        return [vals[i] for i, (n, l, _) in enumerate(pm.CASES)
+                if l == lay and dc._size_class(n) == sz]
 
     def _rate(vals, th=0.8):
         xs = [v for v in vals if v is not None]
         return sum(1 for v in xs if v >= th) / len(xs) if xs else 0.0
+
+    def _extreme(vals, mode):
+        xs = [v for v in vals if v is not None]
+        if not xs:
+            return float("nan")
+        return min(xs) if mode == "min" else max(xs)
 
     checks_tables, perf_texts = [], []
     for sl in prs.slides:
@@ -343,17 +349,20 @@ def main(pptx_path):
         return None
 
     def check_agg(header, rows, fmts, tag):
-        """统计表：3 列（BSND / TND / 全体），值由数据模块按行口径重算。"""
+        """6 列分组统计表：BSND/TND x 小/中/大，按行口径由数据模块重算。"""
         t = find_table(header, [r[0] for r in rows])
         if t is None:
             fail(f"性能页缺统计表: {header} / {[r[0] for r in rows]}")
             return
+        fn_of = {"gm": _gm, "rate": _rate,
+                 "min": lambda v: _extreme(v, "min"),
+                 "max": lambda v: _extreme(v, "max")}
         bad = 0
         for ri, (label, vals, mode) in enumerate(rows):
-            fn = _rate if mode == "rate" else _gm
-            by = _split(vals)
-            exp = [fmts[ri](fn(x)) for x in by] + [fmts[ri](fn(vals))]
-            got = [t.cell(ri + 1, ci + 1).text.strip() for ci in range(3)]
+            fn = fn_of[mode]
+            exp = [fmts[ri](fn(_gvals(vals, lay, sz)))
+                   for lay in ("BSND", "TND") for sz in SIZES]
+            got = [t.cell(ri + 1, ci + 1).text.strip() for ci in range(6)]
             if got != exp:
                 bad += 1
                 fail(f"性能统计表 {header}/{label}: {got} != {exp}")
@@ -364,24 +373,27 @@ def main(pptx_path):
     pen_opst = _ratio(pm.OPST_DET, pm.OPST_ND)
     det_ratio = _ratio(pm.OPST_DET, pm.OURS_DET)
     nd_ratio = _ratio(pm.OPST_ND, pm.OURS_ND)
+    f2 = lambda v: f"{v:.2f}"
+    fp = lambda v: f"{v:.0%}"
     check_agg("det/nd 开销 (×)",
               [("ours det/nd 几何平均", pen_ours, "gm"),
-               ("opst det/nd 几何平均", pen_opst, "gm")],
-              [lambda v: f"{v:.2f}"] * 2, "9.1")
-    check_agg("det 对比 (×)",
-              [("opst/ours 几何平均", det_ratio, "gm"),
-               ("达标 (≥0.8×)", det_ratio, "rate")],
-              [lambda v: f"{v:.2f}", lambda v: f"{v:.0%}"], "9.2")
-    check_agg("nd 对比 (×)",
-              [("opst/ours 几何平均", nd_ratio, "gm"),
-               ("达标 (≥0.8×)", nd_ratio, "rate")],
-              [lambda v: f"{v:.2f}", lambda v: f"{v:.0%}"], "9.3")
+               ("opst det/nd 几何平均", pen_opst, "gm"),
+               ("ours 最差组", pen_ours, "max")],
+              [f2, f2, f2], "9.1")
+    for header, ratio, tag in (("det 对比 (×)", det_ratio, "9.2"),
+                               ("nd 对比 (×)", nd_ratio, "9.3")):
+        check_agg(header,
+                  [("opst/ours 几何平均", ratio, "gm"),
+                   ("达标 (≥0.8×)", ratio, "rate"),
+                   ("最差（组内 min）", ratio, "min")],
+                  [f2, fp, f2], tag)
 
     # 9.4 明细：4 张表（BSND 11+10 / TND 8+7），逐格核验
     detail = [t for t in checks_tables
               if t.cell(0, 0).text.strip() == "核时 (μs)"]
-    blocks = [_idx("BSND")[:11], _idx("BSND")[11:],
-              _idx("TND")[:8], _idx("TND")[8:]]
+    bsnd = [i for i, c in enumerate(pm.CASES) if c[1] == "BSND"]
+    tnd = [i for i, c in enumerate(pm.CASES) if c[1] == "TND"]
+    blocks = [bsnd[:11], bsnd[11:], tnd[:8], tnd[8:]]
     if len(detail) != len(blocks):
         fail(f"性能明细表数量 {len(detail)} != {len(blocks)}")
     else:
