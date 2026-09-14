@@ -100,6 +100,8 @@ SeeTen/
    这类具体名字，不要 p、w、x、y 满屏。
 7. **表项要写清是哪个轴的哪个索引。** 格内写 `S1=2  S2=3` / `B=1 N2=1 G=1`，
    **不要**写成逗号或分号分隔的裸数字。轴的含义放在表格外面的小面板里。
+   表头这类大写密集的短字符串（如 `MHA/GQA`）按估宽再留约 20% 余量 ——
+   估宽器按 TNR 实测系数折算，但渲染器量宽可能略大，贴边就会裁字。
 8. **任务矩阵：轮数是纵轴，核数是横轴。** 行 = 第 N 轮，列 = C1..Ck（`sd.task_matrix`）。
 9. **配色用预设色组。** 从 `assets/color-sets.json` 的 `lane_sets` 选一套：
    `cool`（默认，低饱和冷色）/ `deck`（深色高对比）/ `clay`（暖色）/ `mist`（极简蓝灰）/
@@ -134,13 +136,14 @@ SeeTen/
     0 间距过近（表格 / 图片与相邻元素 ≥ 0.15 in）→ ④ `verify_demo.py` 表样式/字体
     回读一致 → ⑤ `render_deck.ps1` 渲染后逐页看图 → ⑥ case 的 `check_case.py`
     （公式回代 + 结论句核对）0 失配。
-17. **性能对比图可选，只有拿到数据才画。** 分清三类对比：det vs det（本仓库 vs
-    参考仓库 opst）、确定性开销（各仓库内部 det / nd）、本仓库自身版本。核时**表**
-    只认 profiling 的 device 侧 kernel 时间，**不能用 event record 端到端时间**
-    （建议 7 行：4 行原始核时 + 3 行比值，表字号 12.5）；吞吐/带宽**柱状图**优先
-    `sd.perf_figure()`（matplotlib 渲染后贴图，写清指标与归一基准），没有 matplotlib
-    时退回 `sd.perf_bars()`。色系取 DeepSeek 图：本仓库宝蓝 `#4D6BFE`（白斜纹）+
-    次版本浅蓝，参考方灰系；细节见 `references/style-spec.md` §8。
+17. **性能对比图可选，只有拿到数据才画；一类对比一页。** 分清三类对比：det vs det
+    （本仓库 vs 参考仓库 opst）、确定性开销（各仓库内部 det / nd）、nd vs nd。每页
+    横轴拉满、覆盖**全部 case**；图下配同口径 2–3 行小表（核时只认 profiling 的
+    device 侧时间，**不能用 event record**；加粗按 det / nd 各自组内最优）。
+    柱状图优先 `sd.perf_figure()`（matplotlib 贴图；比值图用 `split=1.0`：≥1 主色、
+    <1 标灰；**图例写“画的是什么量”**），没装 matplotlib 时退回 `sd.perf_bars()`。
+    色系取 DeepSeek 图：本仓库宝蓝 `#4D6BFE`（白斜纹）+ 次版本浅蓝，参考方灰系；
+    细节见 `references/style-spec.md` §8 与 `references/diagram-recipes.md` 配方 10。
 
 ## 风格地基（复刻这套观感时不变的部分）
 

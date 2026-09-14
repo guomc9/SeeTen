@@ -91,3 +91,11 @@ keys instead. That is a design choice, not a defect.
 - Shortcuts such as "skip the reduction when only one tile contributes" **do not exist** in the
   reference implementation (it always goes seed → reduce → single atomic add). Don't copy an
   imagined optimization into a diagram.
+- Capital-heavy headers (`MHA/GQA`) need ~20% extra width beyond the estimate: renderers
+  measure wider than the estimator and clip both ends of the string.
+- Performance comparison pages: one comparison class per page (determinism penalty /
+  det-vs-det / nd-vs-nd), full-shape axes, legend states the plotted quantity
+  (`opst / ours det cost`), ratio charts colour values below 1 gray, and kernel time comes
+  from profiling only — never event-record timings.
+- Keep >= 0.15 in between tables/figures and their neighbours (`check_gaps`); when panels
+  stop fitting, split pages or drop auxiliary panels instead of tightening the gaps.
