@@ -1197,8 +1197,8 @@ def draw_perf_ratio_page(prs, num, title, sub, size, series_specs, fig_note,
             series=series, ylabel="ratio", ref=ref,
             split=split if len(series) == 1 else None,
             bar_w=0.60 if len(series) == 1 else 0.40,
-            xrot=30, show_values=False, legend=True,
-            value_size=7.0, label_size=8.4))
+            xrot=90, show_values=False, legend=True,
+            value_size=7.0, label_size=8.0))
     fig_bottom = sd.perf_figure(s, 0.73, 1.64, 15.2, 6.05, panels,
                                 note=fig_note)
     ty = fig_bottom + 0.14
