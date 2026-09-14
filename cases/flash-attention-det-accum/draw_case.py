@@ -1207,16 +1207,25 @@ def draw_perf_page(prs, num, title, sub, size, series_specs, fig_note,
         idx = idx_of[lay]
         series = [(label, [vals[i] if vals[i] is not None else 0.0 for i in idx],
                    color) for label, vals, color in series_specs]
+        na_cells = [(si, k) for si, (_l, vals, _c) in enumerate(series_specs)
+                    for k, i in enumerate(idx) if vals[i] is None]
+        n_g = max(len(idx), 1)
+        base_w = 0.60 if len(series) == 1 else 0.40
         panels.append(dict(
             title=f"{lay} {SZ_EN[size]} ({len(idx)})",
             groups=[f"#{i+1} · {pm.SIZE_MB[i]:.1f}MB" for i in idx],
             series=series, ylabel="ratio", ref=ref,
             split=split if len(series) == 1 else None,
-            bar_w=0.60 if len(series) == 1 else 0.40,
-            xrot=0, show_values=False, legend=True,
-            value_size=7.0, label_size=9.0))
+            bar_w=min(base_w, 0.079 * n_g),
+            xrot=0, show_values=False, legend=(lay == "BSND"),
+            value_size=7.0, label_size=9.0, na_cells=na_cells))
+    # 柱多（>=8）时上下堆叠（每栏全宽），柱少时并排（避免单栏空太多）
+    ncols = 1 if max(len(idx_of["BSND"]), len(idx_of["TND"])) >= 8 else 2
+    if ncols == 2:
+        for pnl in panels:
+            pnl["legend"] = True
     fig_bottom = sd.perf_figure(s, 0.73, TOP, 15.2, fig_h, panels,
-                                note=fig_note, dpi=320)
+                                note=fig_note, dpi=320, ncols=ncols)
     ty = fig_bottom + GAP
     header = ("#", "shape (b n g s2 s1 d c/nc)") + tuple(metric_cols)
     if len(metric_cols) == 2:

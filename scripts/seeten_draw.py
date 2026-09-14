@@ -1407,6 +1407,7 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None,
              否则 split_lo，默认灰）—— 用于"比值 < 1 标灰"这类好坏分侧；
              bar_w = 单柱占组槽的宽度比例（缺省 0.80/系列数；单系列图建议 0.4–0.5，
              柱子细一点更透气）；
+             na_cells = [(系列号, 组号), ...] 画 n/a 小标记（该柱无数据）；
              xrot = 横轴标签旋转角度（case 多时用 45–90，缺省 0）；
              show_values = 是否在每根柱顶标数值（缺省 True；柱子太密时设 False，
              数值交给图下的小表）；value_size = 柱顶数值字号（缺省 7.5）。
@@ -1491,6 +1492,16 @@ def perf_figure(slide, x, y, w, h, panels, dpi=200, note=None, font=None,
             else:
                 for gi_, v in enumerate(vals):
                     draw_bar(gi_, v)
+        # 无数据的柱（参考实现无法运行等）：画一个小斜纹底座 + n/a 标记，
+        # 避免"柱高为 0 看起来像漏画"。na_cells = [(系列号, 组号), ...]
+        for (si_, gi_) in p.get("na_cells", []):
+            off_ = (si_ - (n_s - 1) / 2.0) * width
+            xpos = xv[gi_] + off_
+            hgt = max(vmax, 1e-6) * 0.035
+            ax.bar([xpos], [hgt], width * 0.92, color="#F5F5F5", zorder=3,
+                   edgecolor="#" + PERF_REF, linewidth=0.8, hatch="xx")
+            ax.text(xpos, hgt * 1.8, "n/a", ha="center", va="bottom",
+                    fontsize=7.0, color="#" + PERF_SUB, zorder=4)
         if p.get("ref") is not None:
             ax.axhline(p["ref"], ls=(0, (4, 3)), lw=0.9, color="#" + PERF_AXIS, zorder=2)
         ax.set_xticks(xv)
