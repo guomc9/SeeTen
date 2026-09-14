@@ -1413,68 +1413,85 @@ def draw_after_perf(prs):
 
 
 def draw_profiling_pages(prs):
-    """10.1 分 pipe profiling 数据 + 10.2 瓶颈结论与优化优先级。"""
+    """10.1 BSND / 10.2 TND 分 pipe 数据 + 10.3 结论与优化优先级。"""
     import profile_data as pf
 
-    cols = ("dur", "MAC", "MTE2", "fixpipe", "scal_c", "vec", "scal_v", "cube%")
+    def data_page(title, shape_desc, rows, note):
+        s = sd.blank_slide(prs)
+        sd.title(s, title, y=0.62)
+        sd.text(s, 0.73, 1.20,
+                "device 侧用时 µs；dur = Task Duration；MAC / MTE2 / MTE1 / fixpipe = cube 侧各口；"
+                "scal_c / scal_v = AIC / AIV 标量口（解码、循环、同步）；vec = AIV 向量；"
+                "cube% = cube 利用率",
+                w=15.2, h=0.30, size=12.0, color=sd.BODY_TEXT)
+        sd.text(s, 0.73, 1.62, shape_desc, w=14.8, h=0.30, size=13.5, bold=True,
+                color=sd.TITLE_TEXT)
+        hdr = ("case", "实现") + pf.COLS
+        body = [(tag, impl) + tuple(f"{v:.1f}" for v in vals)
+                for tag, impl, vals in rows]
+        sd.spec_table(s, 0.73, 2.06, hdr, body,
+                      col_w=(0.62, 1.48) + (1.40,) * 9,
+                      row_h=[0.40] + [0.50] * 12, zebra=True,
+                      size=11.5, header_size=12.0)
+        sd.note(s, 0.73, 8.72, note, w=15.2, h=0.34, size=11.5)
+        return s
 
-    # ---- 10.1 数据页 ----
-    s = sd.blank_slide(prs)
-    sd.title(s, "10.1. Profiling：分 pipe 用时（msprof PipeUtilization）", y=0.62)
-    sd.text(s, 0.73, 1.22,
-            "device 侧用时 µs；dur = Task Duration；MAC/MTE2/fixpipe = cube 三件套；"
-            "scal_c / scal_v = AIC / AIV 标量口（解码、循环、同步）；cube% = cube 利用率 · "
-            "warmup 5 + repeat 10 · 非 event record",
-            w=15.2, h=0.34, size=12.0, color=sd.BODY_TEXT)
-    sd.text(s, 0.73, 1.70, f"A · {pf.TND_SHAPE}（det 与 nd 同 shape）",
-            w=14.0, h=0.28, size=13.5, bold=True, color=sd.TITLE_TEXT)
-    rows = [(lab,) + tuple(f"{v:.1f}" for v in vals) for lab, vals in pf.TND_ROWS]
-    sd.spec_table(s, 0.73, 2.18, ("实现",) + cols, rows,
-                  col_w=(1.75,) + (1.60,) * 8, row_h=[0.36] * 5, zebra=True,
-                  size=11.5, header_size=12.0)
-    ty = 2.18 + 5 * 0.36 + 0.30
-    sd.text(s, 0.73, ty, f"B · {pf.BSND_SHAPE}",
-            w=14.6, h=0.28, size=13.5, bold=True, color=sd.TITLE_TEXT)
-    rows = [(tag, impl) + tuple(f"{v:.1f}" for v in vals)
-            for tag, impl, vals in pf.BSND_ROWS]
-    sd.spec_table(s, 0.73, ty + 0.42, ("case", "实现") + cols, rows,
-                  col_w=(0.62, 1.55) + (1.45,) * 8, row_h=[0.335] * 13,
-                  zebra=True, size=10.5, header_size=11.0)
+    data_page("10.1. Profiling · BSND（小 / 中 / 大典型案例）",
+              pf.BSND_SHAPE, pf.BSND_ROWS,
+              "读法：先比 dur，再看哪条 pipe 最高。中 / 大 case 的 det 缺口集中在 MTE2 与 fixpipe"
+              "（中 +26.6 / +8.9；大 +44.8 / +35.0）；nd 每条 pipe 均 ≤ opst 而 dur 仍 1.35–1.49×；"
+              "小 case 全部 pipe ≤ 10µs，ours 已快于 opst（25.4 / 32.3 vs 28.4 / 33.5）")
+    data_page("10.2. Profiling · TND causal（小 / 中 / 大典型案例）",
+              pf.TND_SHAPE, pf.TND_ROWS,
+              "与 BSND 同构：中 / 大 case nd 各口 ≤ opst、dur 1.45–1.51×；det 缺口 = MTE2 +62.5 / +54.3、"
+              "fixpipe +80.9 / +64.1；scalar、MAC 均不高于 opst。小 case ours 全面占优（nd 27.0 vs 33.2、"
+              "det 39.3 vs 45.7，opst 的 fixpipe 反而更高）")
 
-    # ---- 10.2 结论页 ----
+    # ---- 10.3 结论与优化优先级 ----
     s = sd.blank_slide(prs)
-    sd.title(s, "10.2. Profiling 结论：瓶颈在哪、先优化什么", y=0.62)
-    sd.text(s, 0.73, 1.22,
-            "读法：先看 dur（总时长）再看哪条 pipe 最高；比较同一 shape 的 det / nd "
-            "与两仓库实现 —— 若我们每条 pipe 都不高于对方、时长却更长，问题在重叠/等待",
-            w=15.2, h=0.34, size=12.0, color=sd.BODY_TEXT)
+    sd.title(s, "10.3. Profiling 结论与优化优先级", y=0.62)
+    sd.text(s, 0.73, 1.20,
+            "两条主线：① nd 主流水「每条 pipe 都不高、dur 却长 1.4–1.5×」⇒ 重叠 / 串联受限；"
+            "② det 的增量全部落在 MTE2 + fixpipe（加载与写回），MAC 不高于 opst",
+            w=15.2, h=0.30, size=12.5, color=sd.BODY_TEXT)
     rows = [
-        ("nd 主流水是瓶颈",
-         "中/大 shape：ours nd 91 / 263µs vs opst 67 / 177µs（1.35–1.49×），但**我们每条 pipe 都不更高**\n"
-         "（MTE2 28 vs 15、59 vs 59；fixpipe 34 vs 46、88 vs 146；scalar 21 vs 30、67 vs 78）；"
-         "cube% 93 / 95 仍有余量\n"
-         "→ **重叠/串联受限**，非吞吐受限；小 shape 全部 pipe ≤10µs、时长 25–33µs"
-         "（固定开销主导，我们已持平/更快）"),
-        ("det 的增量在加载与写回",
-         "BSND 中 MTE2 +27µs（45.6 vs 19.0）；大 MTE2 +45（135 vs 90）+ fixpipe +35（180 vs 145）；"
-         "TND causal MTE2 +63、fixpipe +81\n"
-         "MAC 均不高于 opst → 重复加载 Q/Kᵀ/K/dY 与 fp32 原子累加 + 每列 cast 是 det 主要成本\n"
-         "（nd 的 KV 驻留 + L0C 累积未用于 det）"),
-        ("scalar / 解码不是瓶颈",
-         "nd scalar 全面低于 opst（21 vs 30、67 vs 78、78 vs 94）；det scalar 仅 +0.6 / +14 / +21µs\n"
-         "nd 实例化里 det 解码被 if constexpr 编译掉；削减 lookahead 的实测收益 ≈ 0 → 不再投入"),
-        ("优化优先级",
-         "① 主流水重叠（round/barrier、每任务串联、双缓冲）—— nd/det 同时受益\n"
-         "② 把 KV 驻留 + L0C 累积引入 BN2S2 det；③ 解码/scalar 不做"),
+        ("nd 主流水\n（共同瓶颈）",
+         "TND 中 / 大：dur 283.7 / 282.0 vs opst 188.4 / 194.0（1.51× / 1.45×），但 MTE2 69.7 / 76.1\n"
+         "vs 62.7 / 66.6、fixpipe 97.8 / 102.9 vs 150.8 / 154.8、scal_c 78.1 / 75.5 vs 94.4 / 96.1；\n"
+         "cube% 86 / 89 vs 95 / 95。BSND 中 / 大同构（91.0 / 263.3 vs 67.2 / 177.0，各口 ≤ opst）",
+         "重叠 / 每任务\n串联受限", "① 主流水重叠\n（round、barrier、\n双缓冲、加深流水）"),
+        ("det 增量在\n加载与写回",
+         "TND 中：MTE2 +62.5（194.4 vs 131.9）、fixpipe +80.9（261.8 vs 180.9）；TND 大 +54.3 / +64.1；\n"
+         "BSND 中 +26.6 / +8.9、大 +44.8 / +35.0。MAC 均不高于 opst —— 不是算得慢，是搬得多、写得多",
+         "重复加载 Q / Kᵀ / K / dY\n+ fp32 原子累加与\n每列 cast", "② BN2S2 det 引入\nKV 驻留 + L0C 累积"),
+        ("scalar / 解码\n不是瓶颈",
+         "nd scal_c 全面低于 opst（TND 78.1/75.5 vs 94.4/96.1；BSND 20.9/67.4 vs 29.6/77.8）；\n"
+         "det 仅 +21.0/+14.0/+0.6；nd 实例化中 det 解码被 if constexpr 编译掉（lookahead 收益 ≈ 0）",
+         "不是瓶颈", "③ 解码 / scalar 不做"),
+        ("小 shape 已占优",
+         "全部 pipe ≤10µs、dur 25–46µs（固定开销主导）：TND 小 27.0 / 39.3 vs opst 33.2 / 45.7；\n"
+         "BSND 小 25.4 / 32.3 vs opst 28.4 / 33.5 —— 四组全部快于 opst",
+         "维持现状", "—"),
     ]
-    sd.spec_table(s, 0.73, 1.72, ("观察", "证据与结论（数字见 10.1）"),
-                  rows, col_w=(2.60, 12.10),
-                  row_h=[0.42, 0.95, 0.95, 0.70, 0.70], zebra=True,
+    sd.spec_table(s, 0.73, 1.66, ("观察", "证据（10.1 / 10.2 表内数字，µs）", "判断", "行动"),
+                  rows, col_w=(1.85, 7.30, 2.30, 3.25),
+                  row_h=[0.40, 1.05, 1.00, 0.85, 0.68], zebra=True,
                   size=11.5, header_size=12.5)
-    sd.note(s, 0.73, 6.62,
-            "数据留档：.docs/scratch/tnd_causal_ab.md（同表）；结论与 TND / BSND 两套 "
-            "profiling 互为佐证。",
-            w=15.2, h=0.30, size=11.0)
+    ty = 1.66 + 0.40 + 1.05 + 1.00 + 0.85 + 0.68 + 0.26
+    sd.text(s, 0.73, ty, "优化优先级（按收益面排序；本轮仅记录，不改代码）",
+            w=14.0, h=0.30, size=13.0, bold=True, color=sd.TITLE_TEXT)
+    prows = [
+        ("①", "主流水重叠：减少 round / barrier 与每任务串联，双缓冲、加深流水",
+         "nd 各口低于 opst 但慢 1.45–1.51×，cube% 86–89 vs 95", "nd 与 det 同时受益"),
+        ("②", "BN2S2 det 驻留化：KV 组驻留 + L0C 累积（对齐目标主流水，参照合并前的 nd 路径）",
+         "det MTE2 +54~+63、fixpipe +64~+81（中 / 大 TND）", "直接消 det 缺口"),
+        ("③", "解码 / scalar 专项",
+         "nd scal_c 低于 opst；det 仅 +0.6~+21；lookahead 削减收益 ≈ 0", "不做"),
+    ]
+    sd.spec_table(s, 0.73, ty + 0.46, ("#", "方向", "依据", "预期"),
+                  prows, col_w=(0.45, 7.40, 4.35, 2.50),
+                  row_h=[0.36, 0.62, 0.62, 0.50], zebra=True,
+                  size=11.0, header_size=12.0)
     return s
 
 
