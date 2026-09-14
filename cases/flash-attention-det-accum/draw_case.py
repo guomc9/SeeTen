@@ -1181,13 +1181,30 @@ def _stat_rows(series_specs):
 def draw_perf_page(prs, num, title, sub, size, series_specs, fig_note,
                    metric_cols, cell_fn, footer_rows, key, ref=0.8, split=0.8):
     """一张按 size 分页的性能页：横轴 = case 序号 + 数据 size(MB) 的 BSND/TND
-    两幅子图；具体 shape 与逐 case 数值放进下方两张表（BSND 左 / TND 右）。"""
+    两幅子图；具体 shape 与逐 case 数值放进下方两张表（BSND 左 / TND 右）。
+
+    版面自适应：图与表按该页最大行数分配高度（图 4.2–6.0 in，行高 ≤ 0.46 in），
+    结论放在行数较少的那一列下方，避免大块空白。
+    """
     s = sd.blank_slide(prs)
     sd.title(s, f"{num}. {title}", y=0.62)
     sd.text(s, 0.73, 1.22, sub, w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
+
+    idx_of = {lay: _group_idx(lay, size) for lay in ("BSND", "TND")}
+    nrows_of = {lay: 1 + len(idx_of[lay]) + len(footer_rows(lay))
+                for lay in ("BSND", "TND")}
+    n_max = max(nrows_of.values())
+
+    TOP, FIGNOTE, GAP, BOTTOM = 1.72, 0.40, 0.34, 11.86
+    ROW_MAX, FIG_MIN, FIG_MAX = 0.46, 4.20, 6.00
+    fig_h = min(max(BOTTOM - TOP - FIGNOTE - GAP - n_max * ROW_MAX, FIG_MIN),
+                FIG_MAX)
+    row_h = min(ROW_MAX, (BOTTOM - TOP - FIGNOTE - GAP - fig_h) / n_max)
+    cell_size = min(11.2, max(9.5, 11.0 - (ROW_MAX - row_h) * 20.0))
+
     panels = []
     for lay in ("BSND", "TND"):
-        idx = _group_idx(lay, size)
+        idx = idx_of[lay]
         series = [(label, [vals[i] if vals[i] is not None else 0.0 for i in idx],
                    color) for label, vals, color in series_specs]
         panels.append(dict(
@@ -1197,70 +1214,66 @@ def draw_perf_page(prs, num, title, sub, size, series_specs, fig_note,
             split=split if len(series) == 1 else None,
             bar_w=0.60 if len(series) == 1 else 0.40,
             xrot=0, show_values=False, legend=True,
-            value_size=7.0, label_size=8.6))
-    fig_bottom = sd.perf_figure(s, 0.73, 1.64, 15.2, 3.95, panels,
-                                note=fig_note)
-    ty = fig_bottom + 0.12
+            value_size=7.0, label_size=9.0))
+    fig_bottom = sd.perf_figure(s, 0.73, TOP, 15.2, fig_h, panels,
+                                note=fig_note, dpi=320)
+    ty = fig_bottom + GAP
     header = ("#", "shape (b n g s2 s1 d c/nc)") + tuple(metric_cols)
     if len(metric_cols) == 2:
-        col_w = (0.52, 3.30, 1.10, 1.10)
+        col_w = (0.54, 4.50, 1.05, 1.06)
     else:
-        col_w = (0.52, 2.85, 0.95, 0.95, 0.95)
-    row_h = 0.30
-    bottoms = []
-    for xi, lay in zip((0.73, 8.03), ("BSND", "TND")):
-        idx = _group_idx(lay, size)
+        col_w = (0.54, 3.38, 1.07, 1.07, 1.09)
+    bottoms = {}
+    for xi, lay in zip((0.73, 8.13), ("BSND", "TND")):
+        idx = idx_of[lay]
         rows = [(f"#{i+1}", pm.SHAPE[i]) + tuple(cell_fn(i)) for i in idx]
         rows += footer_rows(lay)
         sd.spec_table(s, xi, ty, header, rows, col_w=col_w,
                       row_h=[row_h] * (len(rows) + 1), zebra=True,
-                      size=8.6, header_size=9.4)
-        bottoms.append(ty + (len(rows) + 1) * row_h)
-    sd.note(s, 0.73, min(max(bottoms) + 0.14, 11.20), key, w=15.2, h=0.55,
-            size=11.0)
+                      size=cell_size, header_size=cell_size + 0.9)
+        bottoms[lay] = ty + (len(rows) + 1) * row_h
+
+    short_lay = "BSND" if nrows_of["BSND"] <= nrows_of["TND"] else "TND"
+    x = 0.73 if short_lay == "BSND" else 8.13
+    ny = bottoms[short_lay] + 0.20
+    sd.note(s, x, ny, key, w=7.15, h=min(11.90 - ny, 1.40), size=12.0)
     return s
 
 
 def draw_perf_detail_page(prs):
-    """9.4 全矩阵明细：BNSD/TND 各两张表（case × 四个核时值）。"""
-    s = sd.blank_slide(prs)
-    sd.title(s, "9.10. 全矩阵明细（核时 μs，min of 25）", y=0.62)
-    sd.text(s, 0.73, 1.22,
-            "36 case（BSND 21 + TND 15）× 本仓库 det/nd 与 opst det/nd · "
-            "msprof device 侧 kernel 时间（Task Duration min）· "
-            "空缺 = 参考实现无法运行",
-            w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
+    """9.10 / 9.11 全矩阵明细：BSND 与 TND 各一页，左右两张表、行高放大。"""
     cols = ("ours det", "ours nd", "opst det", "opst nd")
     header = "核时 (μs)"
-
-    def rows_for(indices):
-        out = []
-        for i in indices:
-            name, _lay, label = pm.CASES[i]
-
-            def f(v):
-                return "—" if v is None else f"{v:.1f}"
-
-            out.append((label,
-                        [f(pm.OURS_DET[i]), f(pm.OURS_ND[i]),
-                         f(pm.OPST_DET[i]), f(pm.OPST_ND[i])]))
-        return out
-
     bsnd = _layout_idx("BSND")
     tnd = _layout_idx("TND")
-    blocks = [
-        (0.73, 1.72, bsnd[:11]), (8.05, 1.72, bsnd[11:]),
-        (0.73, 6.48, tnd[:8]), (8.05, 6.48, tnd[8:]),
-    ]
-    for x, y, idxs in blocks:
-        rows = rows_for(idxs)
-        sd.perf_table(s, x, y, cols, rows, header=header,
-                      first_col_w=3.05, col_w=0.98, size=10.0, row_h=0.335,
-                      fmts=["{}"] * len(rows), best=None)
-    sd.note(s, 0.73, 10.95,
-            "表内加粗 = 该列（口径）的全局最小值（核时越小越好）；"
-            "取值均为 msprof Task Duration 最小值，非 event record。",
-            w=15.2, h=0.34)
+
+    def f(v):
+        return "—" if v is None else f"{v:.1f}"
+
+    for num, lay, blocks in (("9.10", "BSND", [bsnd[:11], bsnd[11:]]),
+                             ("9.11", "TND", [tnd[:8], tnd[8:]])):
+        s = sd.blank_slide(prs)
+        sd.title(s, f"{num}. 全矩阵明细：{lay}（核时 μs，min of 25）", y=0.62)
+        sd.text(s, 0.73, 1.22,
+                f"{len(bsnd) if lay == 'BSND' else len(tnd)} case · "
+                "本仓库 det/nd 与 opst det/nd · msprof device 侧 kernel 时间"
+                "（Task Duration min）· 空缺 = 参考实现无法运行",
+                w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
+        rows_max = max(len(b) for b in blocks) + 1
+        row_h = min(0.72, (11.30 - 1.72) / rows_max)
+        size_c = min(13.0, max(10.0, row_h * 18.0))
+        for xi, idxs in zip((0.73, 8.13), blocks):
+            rows = [(pm.CASES[i][2],
+                     [f(pm.OURS_DET[i]), f(pm.OURS_ND[i]),
+                      f(pm.OPST_DET[i]), f(pm.OPST_ND[i])])
+                    for i in idxs]
+            sd.perf_table(s, xi, 1.72, cols, rows, header=header,
+                          first_col_w=3.45, col_w=0.94, size=size_c,
+                          row_h=row_h, fmts=["{}"] * len(rows), best=None)
+        sd.note(s, 0.73, 1.72 + (rows_max + 1) * row_h + 0.20,
+                "数值 = msprof Task Duration 最小值（device 侧核时），非 event record；"
+                "空缺 = opst 无法运行（TND causal 要求 mask Skv=2048）。",
+                w=15.2, h=0.45)
     return s
 
 
