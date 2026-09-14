@@ -1197,7 +1197,7 @@ def draw_perf_ratio_page(prs, num, title, sub, size, series_specs, fig_note,
             series=series, ylabel="ratio", ref=ref,
             split=split if len(series) == 1 else None,
             bar_w=0.60 if len(series) == 1 else 0.40,
-            xrot=90, show_values=False, legend=True,
+            xrot=0, show_values=False, legend=True,
             value_size=7.0, label_size=8.0))
     fig_bottom = sd.perf_figure(s, 0.73, 1.64, 15.2, 6.05, panels,
                                 note=fig_note)
@@ -1304,7 +1304,7 @@ def draw_perf_pages(prs):
             sz,
             [("ours det/nd", pen_ours, sd.PERF_SELF),
              ("opst det/nd", pen_opst, sd.PERF_REF)],
-            "核时取自 msprof Task Duration 最小值；倍率 = det / nd；虚线 = 1.0（无开销）",
+            "标签 = b（batch）· s1×s2（Q/KV 长）· n（KV heads）· g（GQA group）· d（head dim）· c/nc；核时取自 msprof Task Duration 最小值；倍率 = det / nd；虚线 = 1.0（无开销）",
             "det/nd 开销 (×)",
             [("ours det/nd 几何平均", gm_pair(pen_ours, sz), f2),
              ("opst det/nd 几何平均", gm_pair(pen_opst, sz), f2),
@@ -1328,7 +1328,7 @@ def draw_perf_pages(prs):
             "核时为 msprof kernel 时间（device 侧）",
             sz,
             [("opst-det / ours-det", det_ratio, sd.PERF_SELF)],
-            "核时取自 msprof Task Duration 最小值；虚线 = 0.8 目标线；"
+            "标签 = b（batch）· s1×s2（Q/KV 长）· n（KV heads）· g（GQA group）· d（head dim）· c/nc；核时取自 msprof Task Duration 最小值；虚线 = 0.8 目标线；"
             "< 0.8 的柱标灰 = 本仓库用时超过 opst 的 1.25×",
             "det 对比 (×)",
             [("opst/ours 几何平均", gm_pair(det_ratio, sz), f2),
@@ -1354,7 +1354,7 @@ def draw_perf_pages(prs):
             "核时为 msprof kernel 时间（device 侧）",
             sz,
             [("opst-nd / ours-nd", nd_ratio, sd.PERF_SELF)],
-            "核时取自 msprof Task Duration 最小值；虚线 = 0.8 目标线；"
+            "标签 = b（batch）· s1×s2（Q/KV 长）· n（KV heads）· g（GQA group）· d（head dim）· c/nc；核时取自 msprof Task Duration 最小值；虚线 = 0.8 目标线；"
             "< 0.8 的柱标灰；nd 差距是既有主流水问题，与确定性重构无关",
             "nd 对比 (×)",
             [("opst/ours 几何平均", gm_pair(nd_ratio, sz), f2),
