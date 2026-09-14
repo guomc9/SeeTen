@@ -419,27 +419,56 @@ def main(pptx_path):
                               ("pass", "", "", "",
                                f"{_rate(_gvals(nd_ratio, lay, sz), 0.8):.0%}")])
 
-    # 9.10 明细：4 张表（BSND 11+10 / TND 8+7），逐格核验
+    # 9.10 / 9.11 明细：每页一张 8 列表（# + shape + 4 核时 + 2 ratio），
+    # 9.11 末尾两行 = GM / pass（TND 总体）
     detail = [t for t in checks_tables
-              if t.cell(0, 0).text.strip() == "核时 (μs)"]
-    bsnd = [i for i, c in enumerate(pm.CASES) if c[1] == "BSND"]
-    tnd = [i for i, c in enumerate(pm.CASES) if c[1] == "TND"]
-    blocks = [bsnd[:11], bsnd[11:], tnd[:8], tnd[8:]]
-    if len(detail) != len(blocks):
-        fail(f"性能明细表数量 {len(detail)} != {len(blocks)}")
+              if len(t.columns) == 8 and t.cell(0, 0).text.strip() == "#"]
+    od_, ond_ = pm.OURS_DET, pm.OURS_ND
+    pd_, pnd_ = pm.OPST_DET, pm.OPST_ND
+    det_r = _ratio(pd_, od_)
+    nd_r = _ratio(pnd_, ond_)
+
+    def _s(v):
+        return "—" if v is None else f"{v:.1f}"
+
+    def _r(v):
+        return "—" if v is None else f"{v:.2f}"
+
+    if len(detail) != 2:
+        fail(f"性能明细表数量 {len(detail)} != 2")
     else:
         bad = 0
-        for t, idxs in zip(detail, blocks):
-            for ri, ci_ in enumerate(idxs):
-                exp = [pm.OURS_DET[ci_], pm.OURS_ND[ci_],
-                       pm.OPST_DET[ci_], pm.OPST_ND[ci_]]
-                exp_s = ["—" if v is None else f"{v:.1f}" for v in exp]
-                got = [t.cell(ri + 1, c).text.strip() for c in range(1, 5)]
-                if got != exp_s:
+        for t, lay in zip(detail, ("BSND", "TND")):
+            idxs = [i for i, c in enumerate(pm.CASES) if c[1] == lay]
+            for ri, i in enumerate(idxs):
+                exp = [pm.SHAPE[i], _s(od_[i]), _s(ond_[i]), _s(pd_[i]),
+                       _s(pnd_[i]), _r(det_r[i]), _r(nd_r[i])]
+                got = [t.cell(ri + 1, c).text.strip() for c in range(1, 8)]
+                if got != exp:
                     bad += 1
-                    fail(f"明细表行 {pm.CASES[ci_][0]}: {got} != {exp_s}")
+                    fail(f"明细表 {lay} #{i+1}: {got} != {exp}")
+            if lay != "TND":
+                continue
+            n = len(idxs)
+            gm_exp = ["", f"{_gm([v for v in (od_[i] for i in idxs) if v]):.1f}",
+                      f"{_gm([v for v in (ond_[i] for i in idxs) if v]):.1f}",
+                      f"{_gm([v for v in (pd_[i] for i in idxs) if v]):.1f}",
+                      f"{_gm([v for v in (pnd_[i] for i in idxs) if v]):.1f}",
+                      f"{_gm([det_r[i] for i in idxs]):.2f}",
+                      f"{_gm([nd_r[i] for i in idxs]):.2f}"]
+            pass_exp = ["", "", "", "", "",
+                        f"{_rate([det_r[i] for i in idxs], 0.8):.0%}",
+                        f"{_rate([nd_r[i] for i in idxs], 0.8):.0%}"]
+            got_gm = [t.cell(n + 1, c).text.strip() for c in range(1, 8)]
+            got_pass = [t.cell(n + 2, c).text.strip() for c in range(1, 8)]
+            if got_gm != gm_exp:
+                bad += 1
+                fail(f"明细表 TND GM 行: {got_gm} != {gm_exp}")
+            if got_pass != pass_exp:
+                bad += 1
+                fail(f"明细表 TND pass 行: {got_pass} != {pass_exp}")
         if not bad:
-            ok(f"性能明细表: {sum(len(b) for b in blocks)} 行逐格一致")
+            ok("性能明细表: BSND/TND 逐格一致 + TND GM/pass 行一致")
 
     blob = " ".join(perf_texts)
     for token in ("非 event record", "msprof", "Task Duration", "det/nd",

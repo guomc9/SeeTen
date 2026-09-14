@@ -1250,36 +1250,61 @@ def draw_perf_page(prs, num, title, sub, size, series_specs, fig_note,
 
 
 def draw_perf_detail_page(prs):
-    """9.10 / 9.11 全矩阵明细：BSND 与 TND 各一页，左右两张表、行高放大。"""
-    cols = ("ours det", "ours nd", "opst det", "opst nd")
-    header = "核时 (μs)"
-    bsnd = _layout_idx("BSND")
-    tnd = _layout_idx("TND")
+    """9.10 / 9.11 全矩阵明细：每页一张全宽表（# + shape + 4 核时 + 2 ratio），
+    9.11（TND）末尾补 GM 与总体 pass 两行。"""
+    od, ond = pm.OURS_DET, pm.OURS_ND
+    pd, pnd = pm.OPST_DET, pm.OPST_ND
+    det_ratio = _ratio(pd, od)
+    nd_ratio = _ratio(pnd, ond)
+    cols = ("shape (b n g s2 s1 d c/nc)",
+            "ours det", "ours nd", "opst det", "opst nd",
+            "det ratio", "nd ratio")
 
     def f(v):
         return "—" if v is None else f"{v:.1f}"
 
-    for num, lay, blocks in (("9.10", "BSND", [bsnd[:11], bsnd[11:]]),
-                             ("9.11", "TND", [tnd[:8], tnd[8:]])):
+    def r(v):
+        return "—" if v is None else f"{v:.2f}"
+
+    def gm(xs):
+        return _gm([v for v in xs if v is not None])
+
+    for num, lay in (("9.10", "BSND"), ("9.11", "TND")):
+        idxs = _layout_idx(lay)
         s = sd.blank_slide(prs)
         sd.title(s, f"{num}. 全矩阵明细：{lay}（核时 μs，min of 25）", y=0.62)
         sd.text(s, 0.73, 1.22,
-                f"{len(bsnd) if lay == 'BSND' else len(tnd)} case · "
-                "本仓库 det/nd 与 opst det/nd · msprof device 侧 kernel 时间"
+                f"{len(idxs)} case · 本仓库 det/nd 与 opst det/nd · "
+                "ratio = opst / 本仓库（≥ 0.8 达标）· msprof device 侧 kernel 时间"
                 "（Task Duration min）· 空缺 = 参考实现无法运行",
                 w=15.2, h=0.30, size=13.0, color=sd.BODY_TEXT)
-        rows_max = max(len(b) for b in blocks) + 1
-        row_h = min(0.72, (11.30 - 1.72) / rows_max)
-        size_c = min(13.0, max(10.0, row_h * 18.0))
-        for xi, idxs in zip((0.73, 8.13), blocks):
-            rows = [(pm.CASES[i][2],
-                     [f(pm.OURS_DET[i]), f(pm.OURS_ND[i]),
-                      f(pm.OPST_DET[i]), f(pm.OPST_ND[i])])
-                    for i in idxs]
-            sd.perf_table(s, xi, 1.72, cols, rows, header=header,
-                          first_col_w=3.45, col_w=0.94, size=size_c,
-                          row_h=row_h, fmts=["{}"] * len(rows), best=None)
-        sd.note(s, 0.73, 1.72 + (rows_max + 1) * row_h + 0.20,
+
+        rows = [(f"#{i+1}", pm.SHAPE[i], f(od[i]), f(ond[i]), f(pd[i]),
+                 f(pnd[i]), r(det_ratio[i]), r(nd_ratio[i]))
+                for i in idxs]
+        footers = []
+        if lay == "TND":                     # 最后一页补 GM 与总体 pass
+            footers = [
+                ("GM", "",
+                 f"{gm([od[i] for i in idxs]):.1f}",
+                 f"{gm([ond[i] for i in idxs]):.1f}",
+                 f"{gm([pd[i] for i in idxs]):.1f}",
+                 f"{gm([pnd[i] for i in idxs]):.1f}",
+                 f"{gm([det_ratio[i] for i in idxs]):.2f}",
+                 f"{gm([nd_ratio[i] for i in idxs]):.2f}"),
+                ("pass", "", "", "", "", "",
+                 f"{_rate([det_ratio[i] for i in idxs], 0.8):.0%}",
+                 f"{_rate([nd_ratio[i] for i in idxs], 0.8):.0%}"),
+            ]
+        rows += footers
+        n_rows = len(rows) + 1
+        row_h = min(0.46, (11.05 - 1.72) / n_rows)
+        size_c = min(12.0, max(10.0, row_h * 24.0))
+        sd.spec_table(s, 0.73, 1.72, ("#",) + cols, rows,
+                      col_w=(0.52, 4.10, 1.66, 1.66, 1.66, 1.66, 1.66, 1.63),
+                      row_h=[row_h] * n_rows, zebra=True,
+                      size=size_c, header_size=size_c + 0.6)
+        sd.note(s, 0.73, min(1.72 + n_rows * row_h + 0.18, 11.34),
                 "数值 = msprof Task Duration 最小值（device 侧核时），非 event record；"
                 "空缺 = opst 无法运行（TND causal 要求 mask Skv=2048）。",
                 w=15.2, h=0.45)
