@@ -1228,11 +1228,11 @@ def draw_perf_page(prs, num, title, sub, size, series_specs, fig_note,
     fig_bottom = sd.perf_figure(s, 0.73, TOP, 15.2, fig_h, panels,
                                 note=fig_note, dpi=320, ncols=ncols)
     ty = fig_bottom + GAP
-    header = ("#", "shape (b n g s2 s1 d c/nc)") + tuple(metric_cols)
+    header = ("#", "shape (b n g s2 s1 d causal / non-causal)") + tuple(metric_cols)
     if len(metric_cols) == 2:
         col_w = (0.54, 4.50, 1.05, 1.06)
-    else:
-        col_w = (0.54, 3.38, 1.07, 1.07, 1.09)
+    else:                                    # shape 列放宽：causal / non-causal 写全
+        col_w = (0.52, 3.62, 1.02, 1.02, 1.04)
     bottoms = {}
     for xi, lay in zip((0.73, 8.13), ("BSND", "TND")):
         idx = idx_of[lay]
@@ -1257,7 +1257,7 @@ def draw_perf_detail_page(prs):
     pd, pnd = pm.OPST_DET, pm.OPST_ND
     det_ratio = _ratio(pd, od)
     nd_ratio = _ratio(pnd, ond)
-    cols = ("shape (b n g s2 s1 d c/nc)",
+    cols = ("shape (b n g s2 s1 d causal / non-causal)",
             "ours det", "ours nd", "opst det", "opst nd",
             "det ratio", "nd ratio")
 
@@ -1426,7 +1426,7 @@ def draw_perf_pages(prs):
                      f"{_rate(_group_vals(nd_ratio, lay, sz), 0.8):.0%}")]
 
         draw_perf_page(
-            prs, f"9.{i+7}", f"性能对比：nd-vs-nd（{sz} shape）",
+            prs, f"9.{i+7}", f"性能对比：非确定性 vs 非确定性（{sz} shape）",
             f"比值 = opst-nd / 本仓库-nd（≥ 0.8 = 达标）· {sz} shape 组 · "
             "核时为 msprof kernel 时间（device 侧）· 加粗 = 更优的 nd 核时 · "
             "下划线 = ratio ≥ 0.8（达标）",

@@ -90,7 +90,7 @@ def shape_bsnd(c):
     """标签口径：n = KV 头数（n2），g = 分组比（Hq/Hkv）。"""
     _, b, sq, sk, hq, hkv, hd, causal = c[:8]
     return (f"b{b} n{hkv} g{hq // hkv} s2={sk} s1={sq} d{hd} "
-            f"{'c' if causal else 'nc'}")
+            f"{'causal' if causal else 'non-causal'}")
 
 
 def shape_tnd(c):
@@ -102,7 +102,7 @@ def shape_tnd(c):
                 else "+".join(str(x) for x in segs))
 
     return (f"b{len(cu_q) - 1} n{hkv} g{hq // hkv} s2={seq(cu_k)} "
-            f"s1={seq(cu_q)} d{hd} {'c' if causal else 'nc'}")
+            f"s1={seq(cu_q)} d{hd} {'causal' if causal else 'non-causal'}")
 
 
 def size_mb_bsnd(c):
