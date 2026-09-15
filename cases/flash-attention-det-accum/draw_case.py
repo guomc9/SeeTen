@@ -1454,7 +1454,7 @@ def draw_profiling_pages(prs):
 
     BOTTOM = 11.35      # 4:3 画布 12.5 in，版心下边 11.90：内容底边目标
 
-    def data_page(title, shape_desc, rows, note):
+    def data_page(title, shape_desc, rows, note, shape_desc2=None):
         s = sd.blank_slide(prs)
         sd.title(s, title, y=0.62)
         sd.text(s, 0.73, 1.20,
@@ -1465,9 +1465,12 @@ def draw_profiling_pages(prs):
                 "MAC / MTE2 / MTE1 / fixpipe = cube 侧各口；scal_c / scal_v = AIC / AIV 标量口"
                 "（解码、循环、同步）；vec = AIV 向量；cube% = cube 利用率",
                 w=15.2, h=0.30, size=12.0, color=sd.BODY_TEXT)
-        sd.text(s, 0.73, 1.84, shape_desc, w=15.0, h=0.32, size=13.0, bold=True,
+        sd.text(s, 0.73, 1.82, shape_desc, w=15.0, h=0.30, size=13.0, bold=True,
                 color=sd.TITLE_TEXT)
-        top, hdr_h, note_h = 2.31, 0.40, 0.50
+        if shape_desc2:
+            sd.text(s, 0.73, 2.12, shape_desc2, w=15.0, h=0.30, size=12.5,
+                    color=sd.BODY_TEXT)
+        top, hdr_h, note_h = 2.56, 0.40, 0.50
         row_h = min(0.72, (BOTTOM - top - hdr_h - note_h) / len(rows))
         hdr = ("case", "实现") + pf.COLS
         body = [(tag, impl) + tuple(f"{v:.1f}" for v in vals)
@@ -1485,12 +1488,14 @@ def draw_profiling_pages(prs):
               "极小档（0.26 / 0.33MB）ours 明显落后（实测 det 2.3–2.4×、nd 1.4–1.7×，见 10.3）：全部 pipe ≤0.5µs、"
               "MAC 仅 0.1µs，而 duration 20–34µs ⇒ 差距全在固定开销（启动 + 轮次 / 同步结构）。"
               "0.92MB 起 det 已占优（实测 1.09×）；中 / 大档 det 缺口集中在 MTE2 与 fixpipe"
-              "（+26.6 / +8.9、+44.8 / +35.0），nd 各口 ≤ opst 而 duration 仍 1.35–1.49×")
+              "（+26.6 / +8.9、+44.8 / +35.0），nd 各口 ≤ opst 而 duration 仍 1.35–1.49×",
+              pf.BSND_SHAPE2)
     data_page("10.2. Profiling · TND causal（小 / 中 / 大典型案例）",
               pf.TND_SHAPE, pf.TND_ROWS,
               "与 BSND 同构：中 / 大档 nd 各口 ≤ opst、duration 1.45–1.51×；det 缺口 = MTE2 +62.5 / +54.3、"
               "fixpipe +80.9 / +64.1；MAC、scalar 均不高于 opst。小档（3.3MB）ours 占优："
-              "实测 nd 1.19×、det 1.29×（profiling 中 ours 的 fixpipe 也远低于 opst）")
+              "实测 nd 1.19×、det 1.29×（profiling 中 ours 的 fixpipe 也远低于 opst）",
+              pf.TND_SHAPE2)
 
     # ---- 10.3 结论与优化优先级 ----
     s = sd.blank_slide(prs)
