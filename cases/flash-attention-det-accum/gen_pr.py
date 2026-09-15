@@ -71,6 +71,28 @@ def rnum(v):                       # 比值：截断两位，与 PPT 一致
     return "—" if v is None else f"{_trunc2(v):.2f}"
 
 
+def bmin(a, b, spec=".1f"):
+    """两值中较小者加粗（并列都加粗）；None 显示 —。"""
+    vals = [v for v in (a, b) if v is not None]
+    m = min(vals) if vals else None
+
+    def one(v):
+        if v is None:
+            return "—"
+        t = f"{v:{spec}}"
+        return f"**{t}**" if (m is not None and v == m) else t
+
+    return one(a), one(b)
+
+
+def uma(v):
+    """比值格：≥0.8 达标加下划线（GitHub 支持 <u>），截断两位显示。"""
+    if v is None:
+        return "—"
+    t = f"{_trunc2(v):.2f}"
+    return f"<u>{t}</u>" if v >= 0.8 else t
+
+
 def group_gm_table(ratio, with_pass=True):
     head = "| 分组 | case 数 | 小 shape | 中 shape | 大 shape |\n|---|---:|---:|---:|---:|\n"
     rows = ""
@@ -91,16 +113,18 @@ def full_matrix_table():
             "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
     body = ""
     for i, (name, lay, _) in enumerate(pm.CASES):
-        body += (f"| {i+1} | {name} | {pm.SHAPE[i]} | {fnum(OD[i])} | {fnum(OND[i])} | "
-                 f"{fnum(PD[i])} | {fnum(PND[i])} | {rnum(PEN_O[i])} | {rnum(PEN_P[i])} | "
-                 f"{rnum(DET_R[i])} | {rnum(ND_R[i])} |\n")
+        od_s, pd_s = bmin(OD[i], PD[i])
+        on_s, pn_s = bmin(OND[i], PND[i])
+        body += (f"| {i+1} | {name} | {pm.SHAPE[i]} | {od_s} | {on_s} | "
+                 f"{pd_s} | {pn_s} | {rnum(PEN_O[i])} | {rnum(PEN_P[i])} | "
+                 f"{uma(DET_R[i])} | {uma(ND_R[i])} |\n")
     for lay in ("BSND", "TND"):
         idx = idx_of(lay)
-        body += (f"| GM | {lay} |  | {gm([OD[i] for i in idx]):.1f} | "
-                 f"{gm([OND[i] for i in idx]):.1f} | {gm([PD[i] for i in idx]):.1f} | "
-                 f"{gm([PND[i] for i in idx]):.1f} | "
+        gd_o, gd_p = bmin(gm([OD[i] for i in idx]), gm([PD[i] for i in idx]))
+        gn_o, gn_p = bmin(gm([OND[i] for i in idx]), gm([PND[i] for i in idx]))
+        body += (f"| GM | {lay} |  | {gd_o} | {gn_o} | {gd_p} | {gn_p} | "
                  f"{gm([PEN_O[i] for i in idx]):.2f} | {gm([PEN_P[i] for i in idx]):.2f} | "
-                 f"{gm([DET_R[i] for i in idx]):.2f} | {gm([ND_R[i] for i in idx]):.2f} |\n")
+                 f"{uma(gm([DET_R[i] for i in idx]))} | {uma(gm([ND_R[i] for i in idx]))} |\n")
         body += (f"| pass | {lay} |  |  |  |  |  |  |  | "
                  f"{_rate([DET_R[i] for i in idx]):.0%} | {_rate([ND_R[i] for i in idx]):.0%} |\n")
     return head + body
@@ -252,7 +276,8 @@ causal 专用调度与 TND ragged flat 分区，并完成与 ops-transformer（o
 ### vs. ops-transformer 性能对比明细
 
 逐 case 全矩阵（核时 µs，median of 25）；`ours det/nd` 与 `opst det/nd` 为
-确定性开销倍率，`det ratio` / `nd ratio` = opst / 本实现；空值 = opst 无法运行
+确定性开销倍率，`det ratio` / `nd ratio` = opst / 本实现（**加粗** = 双方更优的
+det / nd 核时，<u>下划线</u> = ratio ≥ 0.8 达标）；空值 = opst 无法运行
 （TND causal 要求 mask Skv = 2048）。
 
 {full_matrix_table()}
