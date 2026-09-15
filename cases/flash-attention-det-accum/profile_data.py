@@ -13,10 +13,10 @@ COLS = ("duration", "MAC", "MTE2", "MTE1", "fixpipe", "scal_c", "vec", "scal_v",
 # 0.26MB = 2×33×77 H4/4 D64 causal；0.33MB = 1×128×128 H2/2 D128 causal；
 # 0.92MB = 2×200×300 H4/2 D64 causal；10.5MB = 1×1024² H8 D128 non-causal；
 # 41.9MB = 1×4096² H4 D128 causal
-BSND_SHAPE = ("0.26MB 2×33×77 H4/4 D64 causal · 0.33MB 1×128×128 H2/2 D128 causal · "
-              "0.92MB 2×200×300 H4/2 D64 causal")
-BSND_SHAPE2 = ("10.5MB 1×1024² H8 D128 non-causal · "
-               "41.9MB 1×4096² H4 D128 causal")
+BSND_SHAPE = ("1) 0.26MB 2×33×77 H4/4 D64 causal    2) 0.33MB 1×128×128 H2/2 D128 causal    "
+              "3) 0.92MB 2×200×300 H4/2 D64 causal")
+BSND_SHAPE2 = ("4) 10.5MB 1×1024² H8 D128 non-causal    "
+               "5) 41.9MB 1×4096² H4 D128 causal")
 BSND_ROWS = [
     ("0.26MB", "本仓库 det", (30.5, 0.1, 0.2, 0.1, 0.3, 5.9, 0.9, 6.9, 90.3)),
     ("0.26MB", "本仓库 nd",  (20.0, 0.1, 0.3, 0.1, 0.5, 5.3, 1.3, 6.2, 82.0)),
@@ -42,7 +42,8 @@ BSND_ROWS = [
 
 # ---- TND causal ----
 # 小 = 2 段 256/384 H4 D128（3.3MB）；中 = 2×2048 H8 D128；大 = 4×2048 H4 D128
-TND_SHAPE = "小 2 段 256+384 H4 D128 · 中 2×2048 H8 D128 · 大 4×2048 H4 D128"
+TND_SHAPE = ("1) 小 2 段 256+384 H4 D128    2) 中 2×2048 H8 D128    "
+             "3) 大 4×2048 H4 D128")
 TND_SHAPE2 = ("三档均 causal；数据量 3.3MB / 41.9MB / 41.9MB"
               "（后两档同数据量、不同分段数）")
 TND_ROWS = [

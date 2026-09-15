@@ -1452,7 +1452,9 @@ def draw_profiling_pages(prs):
     """10.1 BSND / 10.2 TND 分 pipe 数据（自适应行高填满版心）+ 10.3 结论。"""
     import profile_data as pf
 
-    BOTTOM = 11.35      # 4:3 画布 12.5 in，版心下边 11.90：内容底边目标
+    # 10.1 / 10.2 版式常量：表格收底 10.60、注记落位 11.12（二者拉开 0.52 in；
+    # 4:3 画布 12.5 in、版心下边 11.90）
+    TABLE_BOTTOM, NOTE_Y = 10.60, 11.12
 
     def data_page(title, shape_desc, rows, note, shape_desc2=None):
         s = sd.blank_slide(prs)
@@ -1470,8 +1472,8 @@ def draw_profiling_pages(prs):
         if shape_desc2:
             sd.text(s, 0.73, 2.12, shape_desc2, w=15.0, h=0.30, size=12.5,
                     color=sd.BODY_TEXT)
-        top, hdr_h, note_h = 2.56, 0.40, 0.50
-        row_h = min(0.72, (BOTTOM - top - hdr_h - note_h) / len(rows))
+        top, hdr_h = 2.56, 0.40
+        row_h = min(0.72, (TABLE_BOTTOM - top - hdr_h) / len(rows))
         hdr = ("case", "实现") + pf.COLS
         body = [(tag, impl) + tuple(f"{v:.1f}" for v in vals)
                 for tag, impl, vals in rows]
@@ -1479,8 +1481,7 @@ def draw_profiling_pages(prs):
                       col_w=(0.85, 1.35) + (1.36,) * len(pf.COLS),
                       row_h=[hdr_h] + [row_h] * len(rows), zebra=True,
                       size=11.5, header_size=12.0)
-        sd.note(s, 0.73, top + hdr_h + row_h * len(rows) + 0.26, note,
-                w=15.2, h=0.40, size=11.5)
+        sd.note(s, 0.73, NOTE_Y, note, w=15.2, h=0.45, size=11.5)
         return s
 
     data_page("10.1. Profiling · BSND（0.26MB → 41.9MB，五档典型案例）",
