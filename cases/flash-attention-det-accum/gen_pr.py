@@ -86,12 +86,12 @@ def bmin(a, b, spec=".1f"):
 
 
 def uma(v):
-    """比值格：≥0.8（达标）用粗体 + 下划线，未达标保持常规（HTML 标签，
-    GitHub 可渲染）；截断两位显示，保证显示值与判定一致。"""
+    """比值格：≥0.8（达标）用粗体（markdown **，不用 HTML 标签），未达标常规；
+    截断两位显示，保证显示值与判定一致。"""
     if v is None:
         return "—"
     t = f"{_trunc2(v):.2f}"
-    return f"<b><u>{t}</u></b>" if v >= 0.8 else t
+    return f"**{t}**" if v >= 0.8 else t
 
 
 def group_gm_table(ratio, with_pass=True):
@@ -278,7 +278,7 @@ causal 专用调度与 TND ragged flat 分区，并完成与 ops-transformer（o
 
 逐 case 全矩阵（核时 µs，median of 25）；`ours det/nd` 与 `opst det/nd` 为
 确定性开销倍率，`det ratio` / `nd ratio` = opst / 本实现（**加粗** = 双方更优的 det / nd 核时；
-ratio 列中 ≥ 0.8 达标的用**粗体 + 下划线**，未达标为常规）；空值 = opst 无法运行
+ratio 列中 ≥ 0.8 达标的用**粗体**，未达标为常规）；空值 = opst 无法运行
 （TND causal 要求 mask Skv = 2048）。
 
 {full_matrix_table()}
