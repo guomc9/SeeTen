@@ -28,7 +28,7 @@ construction.
 | Rule-selection table | Dense Swizzle vs Dense Index compared by which axis the low task-id digit walks, and when to pick each |
 | Fill whitespace with real tables | Comparison table (which rule applies to this shape), cost numbers, per-core column list; placed by priority into whichever column has room |
 | Ownership labels hug their table | `B=1`, `N2=1`, `G=1` span only their own grid and sit right on top of it |
-| Performance comparison pages (optional) | Three pages — determinism penalty (det/nd), det-vs-det, nd-vs-nd — each with a wide matplotlib figure (all 8 shapes) in the DeepSeek palette, a matching kernel-time (msprof, not event record) table and reading notes |
+| Performance comparison pages (optional) | Three pages — determinism penalty (det/nd), 确定性 vs 确定性, nd-vs-nd — each with a wide matplotlib figure (all 8 shapes) in the DeepSeek palette, a matching kernel-time (msprof, not event record) table and reading notes |
 
 ## Files
 
@@ -37,7 +37,7 @@ construction.
 | `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
 | `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
 | `check_case.py` | Content self-check: matrix readback vs algorithms, printed-formula replay, claim cross-checks |
-| `out/v3-index-schedules.pptx` | The generated pages (32: overview + axis walkthrough + virtual-column page + 7 methods x 2 + a harder non-square causal example + ten performance pages: det/nd penalty, det-vs-det and nd-vs-nd each split by small/mid/large shape, plus two full-matrix detail pages (9.10 / 9.11, "vs. ops-transformer 性能对比明细" for BSND / TND), and three profiling pages (per-pipe tables for BSND over five size tiers 0.26MB-41.9MB including the tiniest tier, TND causal small/mid/large, plus the bottleneck/priority conclusions); each comparison page plots case index + data size (MB) on the axis and carries per-layout tables with the concrete shape (b n g s2 s1 d c/nc) and per-case kernel times, sized to fill the page) |
+| `out/v3-index-schedules.pptx` | The generated pages (32: overview + axis walkthrough + virtual-column page + 7 methods x 2 + a harder non-square causal example + ten performance pages: det/nd penalty, 确定性 vs 确定性 and nd-vs-nd each split by small/mid/large shape, plus two full-matrix detail pages (9.10 / 9.11, "vs. ops-transformer 性能对比明细" for BSND / TND), and three profiling pages (per-pipe tables for BSND over five size tiers 0.26MB-41.9MB including the tiniest tier, TND causal small/mid/large, plus the bottleneck/priority conclusions); each comparison page plots case index + data size (MB) on the axis and carries per-layout tables with the concrete shape (b n g s2 s1 d c/nc) and per-case kernel times, sized to fill the page) |
 
 ```bash
 python index_schedules.py          # check the seven algorithms first (expect zero conflicts)
@@ -94,7 +94,7 @@ keys instead. That is a design choice, not a defect.
 - Capital-heavy headers (`MHA/GQA`) need ~20% extra width beyond the estimate: renderers
   measure wider than the estimator and clip both ends of the string.
 - Performance comparison pages: one comparison class per page (determinism penalty /
-  det-vs-det / nd-vs-nd), full-shape axes, legend states the plotted quantity
+  确定性 vs 确定性 / nd-vs-nd), full-shape axes, legend states the plotted quantity
   (`opst / ours det cost`), ratio charts colour values below 1 gray, and kernel time comes
   from profiling only — never event-record timings.
 - Keep >= 0.15 in between tables/figures and their neighbours (`check_gaps`); when panels

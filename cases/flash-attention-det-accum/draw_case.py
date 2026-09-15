@@ -1386,7 +1386,7 @@ def draw_perf_pages(prs):
             f"{gm_lay(pen_opst, 'BSND', sz):.2f}× / {gm_lay(pen_opst, 'TND', sz):.2f}×。",
             ref=1.0, split=1.0)
 
-    # ---- det-vs-det（9.4-9.6） ----
+    # ---- 确定性 vs 确定性（9.4-9.6） ----
     for i, sz in enumerate(SIZES):
         def cell(ci, r=det_ratio, a=od, b=pd):
             da, db = _best_pair(a[ci], b[ci])
@@ -1399,7 +1399,7 @@ def draw_perf_pages(prs):
                      f"{_rate(_group_vals(det_ratio, lay, sz), 0.8):.0%}")]
 
         draw_perf_page(
-            prs, f"9.{i+4}", f"性能对比：det-vs-det（{sz} shape）",
+            prs, f"9.{i+4}", f"性能对比：确定性 vs 确定性（{sz} shape）",
             f"比值 = opst-det / 本仓库-det（≥ 0.8 = 达标）· {sz} shape 组 · "
             "核时为 msprof kernel 时间（device 侧）· 加粗 = 更优的 det 核时 · "
             "下划线 = ratio ≥ 0.8（达标）",

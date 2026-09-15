@@ -24,7 +24,7 @@
 | 选型对照表 | Dense Swizzle 与 Dense Index 按"低位先走哪个轴"逐条对比，并写明各自什么时候用 |
 | 空白处补辅助表 | 对比表、代价数字、每核负责的列；按优先级塞进两栏，哪栏有地方放哪栏 |
 | 归属标记钉在表上 | `B=1`、`N2=1`、`G=1` 只占自己那张图的宽度并紧贴其上 |
-| 性能对比页（可选） | 拆成三页 —— 确定性开销（det/nd）、det-vs-det、nd-vs-nd；每页一张 matplotlib 大图（横轴含全部 8 个 case）+ 对应的核时表（msprof kernel 时间，非 event record）+ 读法 |
+| 性能对比页（可选） | 拆成三页 —— 确定性开销（det/nd）、确定性 vs 确定性、nd-vs-nd；每页一张 matplotlib 大图（横轴含全部 8 个 case）+ 对应的核时表（msprof kernel 时间，非 event record）+ 读法 |
 
 ## 文件
 
@@ -33,7 +33,7 @@
 | `index_schedules.py` | 七种任务索引算法的 Python 实现 + 三条不变量校验 |
 | `draw_case.py` | 用 `scripts/seeten_draw.py` 画出案例页 |
 | `check_case.py` | 内容自检：矩阵回读对照算法、印刷公式回代、结论句核对 |
-| `out/v3-index-schedules.pptx` | 生成的页面（32 页：总览 + 轴遍历与 dS 分块 + 虚拟列专页 + 7 种方法 x 2 + 一页更难的 S2 ≠ S1 例子 + 十页性能对比：确定性开销 / det-vs-det / nd-vs-nd 各按 小/中/大 shape 分页（横轴 = case 序号 + 数据 size MB；每页 BSND｜TND 两幅全宽图 + 两张按 case 的 shape/核时表，含 GM/pass 汇总行）+ 全矩阵明细 BSND/TND 两页（9.10/9.11，标题「vs. ops-transformer 性能对比明细」） + profiling 三页：分 pipe 用时表（BSND 五档 0.26MB–41.9MB（含最小档）、TND causal 小/中/大）+ 瓶颈结论与优化优先级） |
+| `out/v3-index-schedules.pptx` | 生成的页面（32 页：总览 + 轴遍历与 dS 分块 + 虚拟列专页 + 7 种方法 x 2 + 一页更难的 S2 ≠ S1 例子 + 十页性能对比：确定性开销 / 确定性 vs 确定性 / nd-vs-nd 各按 小/中/大 shape 分页（横轴 = case 序号 + 数据 size MB；每页 BSND｜TND 两幅全宽图 + 两张按 case 的 shape/核时表，含 GM/pass 汇总行）+ 全矩阵明细 BSND/TND 两页（9.10/9.11，标题「vs. ops-transformer 性能对比明细」） + profiling 三页：分 pipe 用时表（BSND 五档 0.26MB–41.9MB（含最小档）、TND causal 小/中/大）+ 瓶颈结论与优化优先级） |
 
 ```bash
 python index_schedules.py          # 先看七种算法的校验结果（应全为 0 冲突）
@@ -82,7 +82,7 @@ python check_case.py out/v3-index-schedules.pptx  # 矩阵 + 公式 + 结论自�
   画图时不要照抄想象中的优化。
 - 大写密集的表头（如 `MHA/GQA`）要在估宽之外再留约 20% 余量：渲染器量宽偏大，
   贴边会把两端的字符裁掉。
-- 性能对比一类对比一页（确定性开销 / det-vs-det / nd-vs-nd），横轴纳入全部 case；
+- 性能对比一类对比一页（确定性开销 / 确定性 vs 确定性 / nd-vs-nd），横轴纳入全部 case；
   图例写被画的量（`opst / ours det cost`），比值图 <1 标灰；核时只认 profiling，
   不能用 event record。
 - 表格/图片与相邻元素保持 ≥0.15 in（`check_gaps`）；放不下时优先拆页、丢辅助表，

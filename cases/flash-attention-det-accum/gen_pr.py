@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import os
-import re
+import shutil
 
 import perf_matrix as pm
 import profile_data as pf
@@ -22,7 +22,7 @@ DECK = os.path.join(HERE, "out", "v3-index-schedules.pptx")
 FIGS = os.path.join(HERE, "figs")
 OUT = os.path.join(HERE, "PR.md")
 
-# 图：幻灯片序号 → 文件名（9 页各一张；确定性开销 / det-vs-det / nd-vs-nd × 小中大）
+# 图：幻灯片序号 → 文件名（9 页各一张；确定性开销 / 确定性 vs 确定性 / 非确定性 × 小中大）
 FIG_SLIDES = {
     19: "det-overhead-small.png", 20: "det-overhead-mid.png",
     21: "det-overhead-large.png",
@@ -144,31 +144,37 @@ def main():
 
 ## Related Issue
 
-None.
+支持 FAG v3（Ascend950）反向的**确定性分支**（deterministic bwd）：补齐 TND
+causal 专用调度与 TND ragged flat 分区，并完成与 ops-transformer（opst）的性能
+对齐。（仓库内无对应 issue 编号）
 
 ## Summary
 
-本 PR 为 Ascend950 FA v3 反向补齐/优化确定性（det）路径，并给出与
-**ops-transformer（opst）** 的全矩阵性能对比与分 pipe 归因：
+本 PR 让 `deterministic=True` 的反向覆盖下列布局，并给出与 ops-transformer 的
+达标情况。口径：msprof device 侧 kernel 时间（`Task Duration`），**median of 25**
+（warmup 5 + repeat 20）；比值 = opst / 本实现，**≥0.8 达标**。
 
-- 确定性 bwd 采用 **BN2S2** 列独占调度 + 跨轮 fix 屏障，MHA 上 dk/dv 不落
-  workspace、列尾直接 cast；`deterministic=True` 现在要求 BN2S2（v1/v2 流内
-  VecDTM 回退已随目标主流水重写移除，`mha_bwd.cpp` 有显式校验）。
-- **TND causal 专用调度**：每 batch `sq == sk` 时走左上对齐的 4 段式调度，
-  与 opst 的 causal 语义一致，块冗余算力从 ~2× 降到 0；其余（ragged / GQA）
-  走 dense + mask + 整块裁剪（pruning）。
-- **TND ragged MHA 改 flat 分区**（替换原 legacy 回退），
-  `tnd_ragged_mha_nc` det 72.5 → 31.8 µs。
-- 已把目标分支的「cube Optimize」主流水并入本分支，并保留非确定实例化为原路径。
+**支持的布局**
 
-### 性能对比口径
+| 维度 | 覆盖 |
+|---|---|
+| layout | BSND（dense / causal）、TND（dense / causal，含 ragged / 不等长分段） |
+| head 结构 | MHA / GQA / MQA（n2 = 1~8，g = 1~4） |
+| head dim | 64 / 128 |
+| 形状 | 方阵、矩形（sq ≠ sk）、非对齐尺寸（如 33×77）、奇 batch |
+| 前提 | `deterministic=True` 走 BN2S2 调度（`mha_bwd.cpp` 显式校验） |
 
-msprof device 侧 kernel 时间（`Task Duration`），**median of 25**（warmup 5 +
-repeat 20）；38 个 case（BSND 21 + TND 17，小/中/大 × MHA/GQA/MQA × causal /
-non-causal，det 与 nd 各一次）；opst 的 det 走
-`torch.use_deterministic_algorithms(True)`。比值 = opst / 本实现（≥0.8 达标）。
+**每种布局的性能达标情况**（38 case = BSND 21 + TND 17）
 
-{stats_block()}
+| layout | 确定性 vs 确定性 | 小 shape | 中 shape | 大 shape | 非确定性 vs 非确定性 | 确定性开销 ours / opst |
+|---|---|---|---|---|---|---|
+| BSND | 0.683（29%） | 0.637（40%） | 0.767（36%） | 0.567（0%） | 0.681（5%） | 1.222 / 1.226 |
+| TND | **0.819（41%）** | **1.101（100%）** | 0.665（0%） | 0.666（0%） | 0.655（24%） | **1.158 / 1.447** |
+| 合计 | 0.741（34%） | — | — | — | 0.669（13%） | **1.193 / 1.320**（23/38 个开销 ≤ opst） |
+
+一句话：确定性开销整体优于 opst（1.193 vs 1.320）；确定性核时 TND 整体达标
+（0.819，小档 100%），BSND 小档 40%、中/大档仍有差距（0.57–0.77）；非确定性
+路径的差距来自既有主流水，与本 PR 的确定性改动无关（分 pipe 归因见 Validation）。
 
 ## Validation
 
@@ -198,13 +204,13 @@ non-causal，det 与 nd 各一次）；opst 的 det 走
             f"个本实现开销 ≤ opst。\n")
 
     doc += f"""
-### 性能对比：det-vs-det
+### 性能对比：确定性 vs 确定性
 
-比值 = opst-det / 本实现-det（≥0.8 达标，<0.8 的柱标灰）；虚线 = 0.8 目标线。
+比值 = opst / 本实现（≥0.8 达标，<0.8 的柱标灰）；虚线 = 0.8 目标线。
 
 | 小 shape | 中 shape | 大 shape |
 |---|---|---|
-| ![det-vs-det（小）](figs/det-vs-det-small.png) | ![det-vs-det（中）](figs/det-vs-det-mid.png) | ![det-vs-det（大）](figs/det-vs-det-large.png) |
+| ![确定性 vs 确定性（小）](figs/det-vs-det-small.png) | ![确定性 vs 确定性（中）](figs/det-vs-det-mid.png) | ![确定性 vs 确定性（大）](figs/det-vs-det-large.png) |
 
 {group_gm_table(DET_R)}
 
@@ -280,6 +286,15 @@ shape：1) 小 2 段 256+384 H4 D128　2) 中 2×2048 H8 D128　3) 大 4×2048 H
   `profile_data.py` / `gen_pr.py`，`check_case.py` 逐格回读校验）。
 """
     open(OUT, "w", encoding="utf-8").write(doc)
+    # 同步到 flash-attention-npu/.docs（PR 用：PR.md + figs/）
+    docs = "/data/g00977778/flash-attention-npu/.docs"
+    if os.path.isdir(docs):
+        docs_figs = os.path.join(docs, "figs")
+        os.makedirs(docs_figs, exist_ok=True)
+        for fn in os.listdir(FIGS):
+            shutil.copyfile(os.path.join(FIGS, fn), os.path.join(docs_figs, fn))
+        shutil.copyfile(OUT, os.path.join(docs, "fag_v3_det_bwd_perf_pr.md"))
+        print(f"copied to {docs}/fag_v3_det_bwd_perf_pr.md and {docs}/figs/")
     print(f"wrote {OUT} ({len(doc)} chars) and {len(os.listdir(FIGS))} figs")
 
 
