@@ -44,9 +44,17 @@ causal 专用调度与 TND ragged flat 分区，并完成与 ops-transformer（o
 倍率 = det 核时 / nd 核时（>1 = det 更慢）；虚线 = 1.0；横轴 = case 序号 · 数据量
 （MB）。加粗 = 双方更优的 det / nd 核时。
 
-| 小 shape | 中 shape | 大 shape |
-|---|---|---|
-| ![确定性开销（小）](figs/det-overhead-small.png) | ![确定性开销（中）](figs/det-overhead-mid.png) | ![确定性开销（大）](figs/det-overhead-large.png) |
+**小 shape**
+
+![确定性开销（小）](figs/det-overhead-small.png)
+
+**中 shape**
+
+![确定性开销（中）](figs/det-overhead-mid.png)
+
+**大 shape**
+
+![确定性开销（大）](figs/det-overhead-large.png)
 
 | 分组 | case 数 | 小 shape | 中 shape | 大 shape |
 |---|---:|---:|---:|---:|
@@ -59,9 +67,17 @@ causal 专用调度与 TND ragged flat 分区，并完成与 ops-transformer（o
 
 比值 = opst / 本实现（≥0.8 达标，<0.8 的柱标灰）；虚线 = 0.8 目标线。
 
-| 小 shape | 中 shape | 大 shape |
-|---|---|---|
-| ![确定性 vs 确定性（小）](figs/det-vs-det-small.png) | ![确定性 vs 确定性（中）](figs/det-vs-det-mid.png) | ![确定性 vs 确定性（大）](figs/det-vs-det-large.png) |
+**小 shape**
+
+![确定性 vs 确定性（小）](figs/det-vs-det-small.png)
+
+**中 shape**
+
+![确定性 vs 确定性（中）](figs/det-vs-det-mid.png)
+
+**大 shape**
+
+![确定性 vs 确定性（大）](figs/det-vs-det-large.png)
 
 | 分组 | case 数 | 小 shape | 中 shape | 大 shape |
 |---|---:|---:|---:|---:|
@@ -74,9 +90,17 @@ causal 专用调度与 TND ragged flat 分区，并完成与 ops-transformer（o
 比值 = opst-nd / 本实现-nd（≥0.8 达标）；该差距为目标主流水既有问题，与本 PR 的
 确定性改动无关。
 
-| 小 shape | 中 shape | 大 shape |
-|---|---|---|
-| ![nd-vs-nd（小）](figs/nd-vs-nd-small.png) | ![nd-vs-nd（中）](figs/nd-vs-nd-mid.png) | ![nd-vs-nd（大）](figs/nd-vs-nd-large.png) |
+**小 shape**
+
+![非确定性 vs 非确定性（小）](figs/nd-vs-nd-small.png)
+
+**中 shape**
+
+![非确定性 vs 非确定性（中）](figs/nd-vs-nd-mid.png)
+
+**大 shape**
+
+![非确定性 vs 非确定性（大）](figs/nd-vs-nd-large.png)
 
 | 分组 | case 数 | 小 shape | 中 shape | 大 shape |
 |---|---:|---:|---:|---:|
