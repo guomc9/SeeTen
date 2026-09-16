@@ -109,7 +109,7 @@ def group_gm_table(ratio, with_pass=True):
 
 
 def full_matrix_table():
-    head = ("| # | case | shape (b n g s2 s1 d causal/non-causal) | ours det | ours nd | "
+    head = ("| # | case | shape (b n g s2 s1 d causal/dense) | ours det | ours nd | "
             "opst det | opst nd | ours det/nd | opst det/nd | det ratio | nd ratio |\n"
             "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
     body = ""

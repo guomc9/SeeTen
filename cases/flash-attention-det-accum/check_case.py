@@ -197,12 +197,13 @@ def expected_matrix(kind, shape, mr, kw):
 # ------------------------------------------------------- 主流程
 
 def main(pptx_path):
-    print("== 1. 算法不变量（七个例子 + 5b）")
+    print("== 1. 算法不变量（八个例子 + 5b）")
     for name, kind, shape, mr, kw, _ in ix.cases():
         r = ix.check(kind, shape, mr, **kw)
         bad = r["dup"] + r["dq_conflict"]
-        need_priv = kind not in (ix.KIND_GQA_DENSE, ix.KIND_TND_GQA_DENSE)
-        priv_txt = r["column_private"] if need_priv else "不适用(GQA)"
+        need_priv = kind not in (ix.KIND_GQA_DENSE, ix.KIND_TND_GQA_DENSE,
+                                 ix.KIND_TND_CAUSAL)
+        priv_txt = r["column_private"] if need_priv else "不适用(共享累加)"
         if bad or (need_priv and not r["column_private"]):
             fail(f"{name}: dup={r['dup']} dq={r['dq_conflict']} "
                  f"列私有={priv_txt}")
@@ -259,6 +260,24 @@ def main(pptx_path):
            ix.KIND_TND_DENSE, s6, 7, kw6)
     replay("TND GQA (p17)", lambda r, j: f_tnd_gqa(s7, kw7, 6, r, j),
            ix.KIND_TND_GQA_DENSE, s7, 6, dict(kw7, max_round=6))
+
+    # TND Causal (p19)：伪代码印的段界数字回代（本例 n2=2 → 只有段1）；
+    # 尾段用 n2=3 的 host 数字旁证（文字里引用的 R1=2 / R2=3）
+    p8 = ix.tnd_causal_host_params([384, 256], [384, 256], 2, 2)
+    bi8 = p8["b"] + 1
+    seg8 = (p8["p0"][bi8], p8["max_round"])
+    (ok if seg8 == (9, 9) else fail)(
+        f"TND Causal (p19): 段界 R01={seg8[0]} 总轮数={seg8[1]}（期望 9/9）")
+    p8b = ix.tnd_causal_host_params([384, 256], [384, 256], 3, 2)
+    bib = p8b["b"] + 1
+    seg8b = (p8b["p1"][bib], p8b["p2"][bib])
+    (ok if seg8b == (2, 3) else fail)(
+        f"TND Causal 尾段（n2=3 旁证）: R1={seg8b[0]} R2={seg8b[1]}（期望 2/3）")
+    s8 = ix.Shape(batch=2, qHeadNum=2, kvHeadNum=2, coreNum=2)
+    kw8 = dict(params=p8)
+    r8 = ix.check(ix.KIND_TND_CAUSAL, s8, 9, **kw8)
+    (ok if r8["valid"] == 18 and r8["holes"] == 0 else fail)(
+        f"TND Causal (p19): valid={r8['valid']}/18, idle={r8['holes']}/0")
 
     print("== 4. 结论句核对")
     # GQA：本案例的列是否跨核 —— 文案必须按"不保证"表述
@@ -351,7 +370,7 @@ def main(pptx_path):
                                   for tc in row.cells)
         slide_tables.append(tb)
 
-    # 性能页 9.1..9.9 是第 19..27 张（0-based 18..26）；同页两张表用行标签区分
+    # 性能页 10.1..10.9 是第 21..29 张（0-based 20..28，含 TND Causal 两页）；同页两张表用行标签区分
     def find_table(slide_i, labels):
         for t in slide_tables[slide_i]:
             if t.cell(0, 0).text.strip() != "#":
@@ -394,7 +413,7 @@ def main(pptx_path):
     for i, sz in enumerate(SIZES):
         num = f"9.{i+1}"
         for lay in ("BSND", "TND"):
-            check_case_table(18 + i, num, lay, sz,
+            check_case_table(20 + i, num, lay, sz,
                              lambda j: [_mv(pen_ours[j], "{:.2f}"),
                                         _mv(pen_opst[j], "{:.2f}")],
                              [("GM", "",
@@ -403,7 +422,7 @@ def main(pptx_path):
     for i, sz in enumerate(SIZES):
         num = f"9.{i+4}"
         for lay in ("BSND", "TND"):
-            check_case_table(21 + i, num, lay, sz,
+            check_case_table(23 + i, num, lay, sz,
                              lambda j: [_mv(pm.OURS_DET[j]),
                                         _mv(pm.OPST_DET[j]),
                                         _mv(det_ratio[j], "{:.2f}")],
@@ -415,7 +434,7 @@ def main(pptx_path):
     for i, sz in enumerate(SIZES):
         num = f"9.{i+7}"
         for lay in ("BSND", "TND"):
-            check_case_table(24 + i, num, lay, sz,
+            check_case_table(26 + i, num, lay, sz,
                              lambda j: [_mv(pm.OURS_ND[j]),
                                         _mv(pm.OPST_ND[j]),
                                         _mv(nd_ratio[j], "{:.2f}")],
@@ -425,8 +444,8 @@ def main(pptx_path):
                               ("pass", "", "", "",
                                f"{_rate(_gvals(nd_ratio, lay, sz), 0.8):.0%}")])
 
-    # 9.10 / 9.11 明细：每页一张 8 列表（# + shape + 4 核时 + 2 ratio），
-    # 9.11 末尾两行 = GM / pass（TND 总体）
+    # 10.10 / 10.11 明细：每页一张 8 列表（# + shape + 4 核时 + 2 ratio），
+    # 10.11 末尾两行 = GM / pass（TND 总体）
     detail = [t for t in checks_tables
               if len(t.columns) == 8 and t.cell(0, 0).text.strip() == "#"]
     od_, ond_ = pm.OURS_DET, pm.OURS_ND
@@ -476,7 +495,7 @@ def main(pptx_path):
         if not bad:
             ok("性能明细表: BSND/TND 逐格一致 + TND GM/pass 行一致")
 
-    # profiling 页（10.1 BSND / 10.2 TND / 10.3 结论）：逐格 + 结构校验
+    # profiling 页（11.1 BSND / 11.2 TND / 11.3 结论）：逐格 + 结构校验
     import profile_data as pf
 
     def find_tables(header):
@@ -506,19 +525,19 @@ def main(pptx_path):
             fail(f"{label}: 未找到匹配表（或行数不符）")
         return False
 
-    check_data_table(pf.BSND_ROWS, "10.1 BSND profiling 表")
-    check_data_table(pf.TND_ROWS, "10.2 TND profiling 表")
+    check_data_table(pf.BSND_ROWS, "11.1 BSND profiling 表")
+    check_data_table(pf.TND_ROWS, "11.2 TND profiling 表")
 
-    t = find_tables(("观察", "证据（10.1 / 10.2 数据 + 实测 median of 25）", "判断", "行动"))
+    t = find_tables(("观察", "证据（11.1 / 11.2 数据 + 实测 median of 25）", "判断", "行动"))
     if t:
-        ok(f"10.3 结论表: {len(t[0].rows) - 1} 条观察")
+        ok(f"11.3 结论表: {len(t[0].rows) - 1} 条观察")
     else:
-        fail("缺 10.3 结论表")
+        fail("缺 11.3 结论表")
     t = find_tables(("#", "方向", "依据", "预期"))
     if t:
-        ok(f"10.3 优先级表: {len(t[0].rows) - 1} 条")
+        ok(f"11.3 优先级表: {len(t[0].rows) - 1} 条")
     else:
-        fail("缺 10.3 优先级表")
+        fail("缺 11.3 优先级表")
 
     blob = " ".join(perf_texts)
     for token in ("非 event record", "msprof", "Task Duration", "det/nd",

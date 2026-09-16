@@ -34,18 +34,18 @@ construction.
 
 | File | Purpose |
 |---|---|
-| `index_schedules.py` | Python implementations of the seven task-index algorithms + three invariant checks |
+| `index_schedules.py` | Python implementations of the eight task-index algorithms + three invariant checks |
 | `draw_case.py` | Draws the case pages using `scripts/seeten_draw.py` |
 | `check_case.py` | Content self-check: matrix readback vs algorithms, printed-formula replay, claim cross-checks |
-| `out/v3-index-schedules.pptx` | The generated pages (32: overview + axis walkthrough + virtual-column page + 7 methods x 2 + a harder non-square causal example + ten performance pages: det/nd penalty, 确定性 vs 确定性 and nd-vs-nd each split by small/mid/large shape, plus two full-matrix detail pages (9.10 / 9.11, "vs. ops-transformer 性能对比明细" for BSND / TND), and three profiling pages (per-pipe tables for BSND over five size tiers 0.26MB-41.9MB including the tiniest tier, TND causal small/mid/large, plus the bottleneck/priority conclusions); each comparison page plots case index + data size (MB) on the axis and carries per-layout tables with the concrete shape (b n g s2 s1 d c/nc) and per-case kernel times, sized to fill the page) |
+| `out/v3-index-schedules.pptx` | The generated pages (34: overview + axis walkthrough + virtual-column page + 8 methods x 2 + a harder non-square causal example + ten performance pages: det/nd penalty, 确定性 vs 确定性 and nd-vs-nd each split by small/mid/large shape, plus two full-matrix detail pages (10.10 / 10.11, "vs. ops-transformer 性能对比明细" for BSND / TND), and three profiling pages (per-pipe tables for BSND over five size tiers 0.26MB-41.9MB including the tiniest tier, TND causal small/mid/large, plus the bottleneck/priority conclusions); each comparison page plots case index + data size (MB) on the axis and carries per-layout tables with the concrete shape (b n g s2 s1 d c/nc) and per-case kernel times, sized to fill the page) |
 
 ```bash
-python index_schedules.py          # check the seven algorithms first (expect zero conflicts)
+python index_schedules.py          # check the eight algorithms first (expect zero conflicts)
 python draw_case.py out/v3-index-schedules.pptx   # generate the pages
 python check_case.py out/v3-index-schedules.pptx  # matrix + formula + claim self-check
 ```
 
-## The seven index algorithms
+## The eight index algorithms
 
 Each takes "which round + which core" and returns "which tile that core computes this round"
 (batch / head / group / S1 / S2). They are pure scalar integer arithmetic — the result for a
@@ -60,6 +60,7 @@ given (round, core) is always the same, which is exactly where determinism comes
 | 5 | GQA slicing | One core owns R consecutive task ids; a gcd correction keeps same-round keys distinct | k=2, 2×2 tiles, group 2 | 4 rounds, 8 tasks |
 | 6 | Ragged column-private | Per-batch round prefix; column-private inside a batch; batches may need different round counts | k=2, unequal lengths | 12 tasks + 2 idle |
 | 7 | Ragged flattening | Flatten by area prefix, split into k slices, scan each in order | k=2, group 2 | 12 tasks, zero idle |
+| 8 | Ragged causal (left-up) | Host splits the ragged causal triangles into a whole-triangle segment (heads spread over cores) plus odd-head tail segments; device decodes by pure arithmetic | k=2, b=2 [3,2] tiles, n2=2 | 9 rounds, 18 tasks, zero idle |
 
 ## The three invariants checked
 
@@ -72,9 +73,24 @@ given (round, core) is always the same, which is exactly where determinism comes
 3. **Column-private** (swizzle-style algorithms) — a core owns one column across consecutive
    rounds and walks through S1 inside it without repetition.
 
-All seven pass at the sizes above (0 duplicates, 0 conflicts). The GQA-style variants (5 and 7)
-are deliberately *not* column-private: they rely on flattened slicing plus distinct same-round
-keys instead. That is a design choice, not a defect.
+All eight pass at the sizes above (0 duplicates, 0 conflicts). The GQA-style variants (5 and 7)
+and the ragged causal variant (8) are deliberately *not* column-private: they rely on distinct
+same-round keys plus round-ordered shared-workspace accumulation instead. That is a design
+choice, not a defect.
+
+## Selector status (post 2026-09-15)
+
+- BSND causal MHA: the left-up fold applies only for even batch and S1 = S2; **since v3.1
+  the tiny single-tile square (m == n == 1) is an exception** — the fold would collapse two
+  (batch, head) lanes into one serial lane, so it uses dense + causal mask instead
+  (2 cores / 1 round, negligible mask cost).
+- TND causal MHA: **only when every batch has S1 = S2** does it take algorithm 8 (left-up
+  decomposition, shared workspace); any batch with S1 ≠ S2 keeps dense + causal mask
+  (the only correct choice under right-down alignment).
+- TND MHA dense: algorithm 6 (per-batch column-private) when `TndDenseSafe` holds
+  (every batch's S1 tiles ≥ min(k, S2 tiles)); otherwise it now falls to algorithm 7
+  (area flattening) instead of the legacy fallback.
+- GQA: always algorithm 5 on BSND (causal via epilogue mask) and algorithm 7 on TND.
 
 ## Known pitfalls
 

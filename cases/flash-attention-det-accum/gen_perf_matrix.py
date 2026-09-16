@@ -2,8 +2,8 @@
 """Generate the SeeTen case data module perf_matrix.py from the benchmark CSVs.
 
 Sources:
-  ours : /data/g00977778/tmp-prof/matrix_perf_merged.csv   (post-merge build)
-  opst : /data/g00977778/tmp-prof/matrix_perf_opst.csv
+  ours : /data/g00977778/tmp-prof/latewait_ours.csv   (post-merge build)
+  opst : /data/g00977778/tmp-prof/latewait_opst.csv
 Case list / labels come from tests/test_flash_attn_npu_v3_bwd_det.py.
 """
 import ast
@@ -90,7 +90,7 @@ def shape_bsnd(c):
     """标签口径：n = KV 头数（n2），g = 分组比（Hq/Hkv）。"""
     _, b, sq, sk, hq, hkv, hd, causal = c[:8]
     return (f"b{b} n{hkv} g{hq // hkv} s2={sk} s1={sq} d{hd} "
-            f"{'causal' if causal else 'non-causal'}")
+            f"{'causal' if causal else 'dense'}")
 
 
 def shape_tnd(c):
@@ -102,7 +102,7 @@ def shape_tnd(c):
                 else "+".join(str(x) for x in segs))
 
     return (f"b{len(cu_q) - 1} n{hkv} g{hq // hkv} s2={seq(cu_k)} "
-            f"s1={seq(cu_q)} d{hd} {'causal' if causal else 'non-causal'}")
+            f"s1={seq(cu_q)} d{hd} {'causal' if causal else 'dense'}")
 
 
 def size_mb_bsnd(c):
@@ -133,8 +133,8 @@ def load_csv(path):
 
 def main():
     tables = load_cases()
-    ours = load_csv("/data/g00977778/tmp-prof/matrix_perf_merged.csv")
-    opst = load_csv("/data/g00977778/tmp-prof/matrix_perf_opst.csv")
+    ours = load_csv("/data/g00977778/tmp-prof/latewait_ours.csv")
+    opst = load_csv("/data/g00977778/tmp-prof/latewait_opst.csv")
 
     cases, shorts, shapes, od, ond, pd, pnd, sizes = [], [], [], [], [], [], [], []
     for c in tables["BSND_CASES"]:
@@ -162,7 +162,7 @@ def main():
 
     with open(OUT, "w", encoding="utf-8") as f:
         f.write('"""性能矩阵数据（msprof device 侧 kernel 时间，median of 25，μs）。\n\n'
-                "本仓库 = det-cmp-v3-swizzle @ 合并 integration/FAG-V3-A5(cube Optimize) 后；\n"
+                "本仓库 = det-cmp-v3.2-swizzle @ 1909a89（v3 + v3.1 tiny-trim + v3.2 late-wait）；\n"
                 "opst = 参考仓库（det 用 torch.use_deterministic_algorithms(True)）。\n"
                 "口径：msprof Task Duration 中位数（warmup 5 + repeat 20），非 event record。\n"
                 'None = 该 case 参考实现无法运行。\n"""\n\n')

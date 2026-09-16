@@ -2,7 +2,7 @@
 
     python draw_case.py out/v3-index-schedules.pptx
 
-页面顺序：0 总览 → 1 轴遍历顺序与 dS 分块 → 2..8 七种索引算法各两页。
+页面顺序：0 总览 → 1 轴遍历顺序与 dS 分块 → 2..9 八种索引算法各两页。
 术语约定：不适合直译的直接用英文原词（swizzle / layout / causal / mask / task id /
 idle / fold / buffer / lane），解释句用中文。
 """
@@ -35,14 +35,14 @@ META = {
     ix.KIND_DENSE_SWIZZLE: dict(
         en="Dense Swizzle", cn="列私有 swizzle", low=lambda s, kw: "S2 列",
         tags=lambda s, kw: [("layout", "TND" if "cu_q" in kw else "BSND"),
-                            ("", "非 causal"), ("", "MHA"),
+                            ("", "dense"), ("", "MHA"),
                             ("dk/dv", "列私有")],
         why=["低位是 S2 列 → 同一轮里相邻的核落在**相邻两列**上；",
              "task id 在 m 轮内不变 → 一条核**守死一条列**，列内把 S1 走一遍。",
              "同一个 S2 出现在多条核上，是 **不同 batch / 不同轮**。"]),
     ix.KIND_DENSE_INDEX: dict(
         en="Dense Index", cn="先分批再分列", low=lambda s, kw: "B 批次",
-        tags=lambda s, kw: [("layout", "BSND"), ("", "非 causal"),
+        tags=lambda s, kw: [("layout", "BSND"), ("", "dense"),
                             ("", "MHA"), ("dk/dv", "列私有"),
                             ("核数", "> S1 块数")],
         why=["低位换成 batch → 同一轮各核**分属不同 batch**，S1 撞不到一起；",
@@ -78,7 +78,7 @@ META = {
              "（R 与 g 非整除或 gcd 修正时会分裂）→ 切片分核 + 共享 workspace 的轮序 atomic add。"]),
     ix.KIND_TND_DENSE: dict(
         en="TND Dense Swizzle", cn="逐批列私有", low=lambda s, kw: "本批 S2 列",
-        tags=lambda s, kw: [("layout", "TND (变长)"), ("", "非 causal"),
+        tags=lambda s, kw: [("layout", "TND (变长)"), ("", "dense"),
                             ("", "MHA"), ("dk/dv", "列私有")],
         why=["每个 batch 有自己的 round 前缀，**批内仍按列私有**排；",
              "核数超过本批列数时那一条核空转 —— 变长 batch 的代价。"]),
@@ -88,6 +88,14 @@ META = {
                             ("", "GQA"), ("dk/dv", "共享 workspace")],
         why=["按面积前缀把任务空间**展平后等分成 k 段**，每条核顺序扫自己那段；",
              "不追求列私有，只保证**同轮各核的 (B,N2,G,S1) 互不相同**。"]),
+    ix.KIND_TND_CAUSAL: dict(
+        en="TND Causal", cn="左上分解 + 分段拼合", low=lambda s, kw: "段内索引",
+        tags=lambda s, kw: [("layout", "TND (变长)"), ("", "causal（左上）"),
+                            ("", "MHA"), ("dk/dv", "共享 workspace"),
+                            ("可达性", "★ causal 且批批 S1=S2（MHA）")],
+        why=["变长 batch 的 causal 三角打不成满矩形 → 拆成**整批三角段 + 奇 head 尾段**拼合；",
+             "每个 (round, core) 仍由纯算术唯一定位，同轮 dq/dk/dv 键互异",
+             "→ dq 与 dk/dv 都由轮屏障定序，dk/dv 走共享 workspace。"]),
 }
 
 
@@ -241,6 +249,29 @@ def page_text(kind, shape, mr, kw):
             ex_sub="面积大的 batch 分到的格子多；每个 (S1,S2) 格上有两个 G 的任务，按 G 拆图",
             read=["四个小块合起来 = 12 个任务，2 条核 x 6 轮扫完，**零 idle**。",
                   "batch2 只有 1x2 块，所以它那两张图更矮。"])
+    if kind == ix.KIND_TND_CAUSAL:
+        q, kk = rag()
+        p = kw["params"]
+        bi = p["b"] + 1
+        return dict(
+            sub=("输入：core 数 " + str(k) + " · 各 batch 的 S1 块数 "
+                 + str([(x + 127) // 128 for x in q]) + " · S2 块数 "
+                 + str([(x + 127) // 128 for x in kk]) + f" · head 数 n2={shape.kvHeadNum}"
+                 + " · causal，S1 = S2"),
+            pseudo=[f"core 数 k={k}, batch 数 b={shape.batch}, head 数 n2={shape.kvHeadNum}, causal",
+                    "host 先分段并算段前缀:",
+                    f"    段1 (整批三角): n2 按核数均分, 每核 n2/k={shape.kvHeadNum // k} 个头 → R01={p['p0'][bi]} 轮",
+                    "    n2 为奇数时剩 1 个头 → 段3 左半 + 段4 右半（n2=3 时 R1=2 / R2=3）",
+                    "对每个 (round r, core j):",
+                    f"    r<={p['p0'][bi]}:  段1 —— 批内定位三角序号 a, 反对角线解码 (x,y);",
+                    "        核 j 的头按 (y+j) 轮转 → 同轮各核的 (B,H,S1) 互不相同",
+                    "    尾段:  展平索引 + gcd 修正;  段4 的 x 再平移 n/2"],
+            key="causal 三角由「整批三角段 + 奇 head 尾段」精确拼出：无重复、零 idle，"
+                "同轮 dq/dk/dv 键互异 → 共享 workspace 由轮屏障定序。",
+            ex_sub=("两个 batch 的三角大小不同（batch1 3x3、batch2 2x2）；"
+                    "两个 head 在段1 里并行扫各自的三角，批内按反对角线顺序"),
+            read=["r1-6 是 batch1 的三角（6 块/头），r7-9 是 batch2 的（3 块/头）；",
+                  "n2 为奇数时多出的头走尾段：先左半、后右半，收尾可能剩空槽。"])
     raise KeyError(kind)
 
 
@@ -268,7 +299,7 @@ def lane_column_rows(kind, shape, mr, kw):
 
 
 def dense_choose_rows(kind, shape, mr):
-    """Dense Swizzle 还是 Dense Index —— 两条稠密（非 causal）规则怎么选。
+    """Dense Swizzle 还是 Dense Index —— 两条稠密（dense）规则怎么选。
 
     区别只有一条：task id 的低位先走哪个轴。走列 → 同轮各核是同一个 batch 的不同列；
     走批 → 同轮各核是同一条列的不同 batch，于是核数能超过 S1 块数。
@@ -301,19 +332,19 @@ def applicability_rows(kind, shape, mr, kw=None):
     even = b % 2 == 0
     cands = [
         (ix.KIND_DENSE_SWIZZLE, "Dense Swizzle",
-         [("非 causal", not causal, "本例是 causal"),
+         [("dense", not causal, "本例是 causal"),
           ("MHA", g == 1, f"本例 g={g}"),
           ("k ≤ m", k <= m, f"本例 k={k} > m={m}")]),
         (ix.KIND_DENSE_INDEX, "Dense Index",
-         [("非 causal", not causal, "本例是 causal"),
+         [("dense", not causal, "本例是 causal"),
           ("MHA", g == 1, f"本例 g={g}"),
           ("k > m", k > m, f"本例 k={k} ≤ m={m}")]),
         (ix.KIND_CAUSAL_SWIZZLE, "Causal Swizzle",
-         [("causal", causal, "本例非 causal"),
+         [("causal", causal, "本例 dense"),
           ("MHA", g == 1, f"本例 g={g}"),
           ("batch 偶", even, "本例 batch 为奇")]),
         (ix.KIND_LEFT_UP_CAUSAL, "Left-Up Causal",
-         [("causal", causal, "本例非 causal"),
+         [("causal", causal, "本例 dense"),
           ("MHA", g == 1, f"本例 g={g}"),
           ("batch 偶", even, "本例 batch 为奇"),
           ("S1=S2", m == n, f"本例 {m} ≠ {n}")]),
@@ -628,25 +659,26 @@ def _virtual_grid(slide, x, y, n_cols, n_rows, cells, lane_set=LANE_SET,
 
 def draw_overview(prs):
     s = sd.blank_slide(prs)
-    sd.title(s, "0. 总览：7 种任务索引", y=0.62)
+    sd.title(s, "0. 总览：8 种任务索引", y=0.62)
     sd.text(s, 0.73, 1.22,
-            "同一个问题：给定 (round, core)，这一轮这条 core 该算哪一块？七种规则给出七种分派方式。",
+            "同一个问题：给定 (round, core)，这一轮这条 core 该算哪一块？八种规则给出八种分派方式。",
             w=15.2, h=0.30, size=16, color=sd.BODY_TEXT)
     rows = []
     for i, (name, kind, shape, mr, kw, causal) in enumerate(ix.cases(), start=1):
         m = META[kind]
         rows.append((f"{i}. {m['en']}",
                      "TND" if "cu_q" in kw else "BSND",
-                     "causal" if causal else "非 causal",
+                     "causal" if causal else "dense",
                      "GQA" if shape.groupNum > 1 else "MHA",
-                     "是" if shape.groupNum == 1 else "否",
+                     "否(共享)" if kind == ix.KIND_TND_CAUSAL else
+                     ("是" if shape.groupNum == 1 else "否"),
                      str(mr),
                      m["low"](shape, kw)))
     sd.spec_table(s, 0.73, 1.72,
                   ("规则", "layout", "causal", "MHA/GQA", "列私有", "总轮数", "低位先走哪个轴"),
                   rows,
                   col_w=(2.42, 1.20, 1.20, 1.40, 0.90, 0.90, 1.88),
-                  row_h=(0.58,) + (0.62,) * 7)
+                  row_h=(0.58,) + (0.56,) * 8)
     sd.note(s, 0.73, 7.12,
             "所有规则都是纯算术：(round, core) 一确定，结果就唯一 —— 这就是确定性的来源。",
             w=15.2, h=0.36)
@@ -670,11 +702,12 @@ def draw_overview(prs):
               ("同一轮 S1 不撞", "各核这一轮写的输出块互不相同"),
               ("列私有", "swizzle 类：一条列只归一条 core")],
              col_w=(1.75, 3.25), row_h=0.52, size=12.5)
-    sd.panel(s, 11.05, 8.44, "七种规则归成三条路线", ("路线", "用它的规则"),
+    sd.panel(s, 11.05, 8.44, "八种规则归成四条路线", ("路线", "用它的规则"),
              [("列私有", "1 Dense Swizzle、4 Left-Up、6 TND"),
               ("切片 + gcd 修正", "5 GQA Dense（核数不受 S1 块数限制）"),
-              ("按面积展平", "7 TND GQA（变长 batch，不分列）")],
-             col_w=(1.65, 3.35), row_h=0.52, size=12.5)
+              ("按面积展平", "7 TND GQA（变长 batch，不分列）"),
+              ("左上分解+段拼合", "8 TND Causal（变长 causal，共享累加）")],
+             col_w=(1.65, 3.35), row_h=0.48, size=12.0)
     return s
 
 
@@ -683,7 +716,7 @@ def draw_axis_page(prs):
     s = sd.blank_slide(prs)
     sd.title(s, "1. 轴遍历顺序与 dS 分块", y=0.62)
     sd.text(s, 0.73, 1.22,
-            "七种规则共用同一个铺 task id 的顺序：**外层慢、内层快**。先认这个顺序，后面的分派才看得懂。",
+            "八种规则共用同一个铺 task id 的顺序：**外层慢、内层快**。先认这个顺序，后面的分派才看得懂。",
             w=15.2, h=0.30, size=16, color=sd.BODY_TEXT)
 
     # 轴链 b -> n2 -> s2 -> s1 -> d
@@ -980,8 +1013,10 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
                   f" N2={head[0] + 1} G={head[1] + 1}"
             sd.axis_grid(s, gx, gy, m, n, grid_cells(ts, b, head), f"B={b + 1}{tag}",
                          lane_set=LANE_SET, cell_in=cell, shade_count=n_max,
-                         empty_text="mask" if kind in (ix.KIND_CAUSAL_SWIZZLE,
-                                                       ix.KIND_LEFT_UP_CAUSAL) else "空闲")
+                         empty_text=("mask" if kind in (ix.KIND_CAUSAL_SWIZZLE,
+                                                       ix.KIND_LEFT_UP_CAUSAL)
+                                     else ("区外" if kind == ix.KIND_TND_CAUSAL
+                                           else "空闲")))
             if first:
                 sd.axis_arrow(s, gx - 0.68, gy, (m + 1) * cell - cell * 0.6, "down", "S1")
                 sd.axis_arrow(s, gx, gy - 0.72, (n + 1) * cell - cell * 0.6, "right", "S2")
@@ -1004,7 +1039,8 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
 
     # ---- 剩下的表交给排版流：哪一栏还有地方就放哪一栏
     r = ix.check(kind, shape, mr, **kw)
-    priv = ("— 不适用" if shape.groupNum > 1
+    priv = ("— 不适用（共享 workspace 轮序累加）"
+            if shape.groupNum > 1 or kind == ix.KIND_TND_CAUSAL
             else ("✓ 整列只归一条 core" if r["column_private"] else "✗ 有重复"))
     props_rows = [
         ("任务不重复", "✓ 每个块只被派一次" if not r["dup"] else "✗ 有重复"),
@@ -1020,7 +1056,7 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
         head, rows = lane_column_rows(kind, shape, mr, kw)
         return (sd.panel_height(len(rows), 0.44),
                 lambda x, y: sd.panel(s, x, y, "每条 core 负责哪些列", head, rows,
-                                      col_w=(0.95, w - 0.95), row_h=0.44, size=12.5))
+                                      col_w=(0.95, w - 0.95), row_h=0.44, size=11.5))
 
     def spec_props(w):
         return (sd.panel_height(len(props_rows), 0.44),
@@ -1107,7 +1143,7 @@ def draw_example_page(prs, num, name, kind, shape, mr, kw, causal):
 #   本仓库 = det-cmp-v3-swizzle（合并 integration/FAG-V3-A5 cube Optimize 后）；
 #   参考仓库 = opst（det 走 torch.use_deterministic_algorithms(True)）。
 # 十页：9.1-9.9 确定性开销 / det-vs-det / nd-vs-nd（各按小/中/大）
-#       + 9.10 / 9.11 vs. ops-transformer 性能对比明细（BSND / TND）。
+#       + 10.10 / 10.11 vs. ops-transformer 性能对比明细（BSND / TND）。
 import math
 
 import perf_matrix as pm
@@ -1228,10 +1264,10 @@ def draw_perf_page(prs, num, title, sub, size, series_specs, fig_note,
     fig_bottom = sd.perf_figure(s, 0.73, TOP, 15.2, fig_h, panels,
                                 note=fig_note, dpi=320, ncols=ncols)
     ty = fig_bottom + GAP
-    header = ("#", "shape (b n g s2 s1 d causal / non-causal)") + tuple(metric_cols)
+    header = ("#", "shape (b n g s2 s1 d causal / dense)") + tuple(metric_cols)
     if len(metric_cols) == 2:
         col_w = (0.54, 4.50, 1.05, 1.06)
-    else:                                    # shape 列放宽：causal / non-causal 写全
+    else:                                    # shape 列放宽：causal / dense 写全
         col_w = (0.52, 3.62, 1.02, 1.02, 1.04)
     bottoms = {}
     for xi, lay in zip((0.73, 8.13), ("BSND", "TND")):
@@ -1251,13 +1287,13 @@ def draw_perf_page(prs, num, title, sub, size, series_specs, fig_note,
 
 
 def draw_perf_detail_page(prs):
-    """9.10 / 9.11 vs. ops-transformer 性能对比明细：每页一张全宽表
-    （# + shape + 4 核时 + 2 ratio），9.11（TND）末尾补 GM 与总体 pass 两行。"""
+    """10.10 / 10.11 vs. ops-transformer 性能对比明细：每页一张全宽表
+    （# + shape + 4 核时 + 2 ratio），10.11（TND）末尾补 GM 与总体 pass 两行。"""
     od, ond = pm.OURS_DET, pm.OURS_ND
     pd, pnd = pm.OPST_DET, pm.OPST_ND
     det_ratio = _ratio(pd, od)
     nd_ratio = _ratio(pnd, ond)
-    cols = ("shape (b n g s2 s1 d causal / non-causal)",
+    cols = ("shape (b n g s2 s1 d causal / dense)",
             "ours det", "ours nd", "opst det", "opst nd",
             "det ratio", "nd ratio")
 
@@ -1270,11 +1306,11 @@ def draw_perf_detail_page(prs):
     def gm(xs):
         return _gm([v for v in xs if v is not None])
 
-    for num, lay in (("9.10", "BSND"), ("9.11", "TND")):
+    for num, lay in (("10.10", "BSND"), ("10.11", "TND")):
         idxs = _layout_idx(lay)
         s = sd.blank_slide(prs)
         sd.title(s, f"{num}. vs. ops-transformer 性能对比明细：{lay}（核时 μs，median of 25）",
-                 y=0.62)
+                 y=0.62, w=15.3)
         sd.text(s, 0.73, 1.22,
                 f"{len(idxs)} case · 本仓库 det/nd vs. ops-transformer（opst）det/nd · "
                 "ratio = opst / 本仓库（≥ 0.8 达标）· msprof device 侧 kernel 时间"
@@ -1372,7 +1408,7 @@ def draw_perf_pages(prs):
                      f"{gm_lay(pen_opst, lay, sz):.2f}")]
 
         draw_perf_page(
-            prs, f"9.{i+1}", f"性能对比：确定性开销（{sz} shape）",
+            prs, f"10.{i+1}", f"性能对比：确定性开销（{sz} shape）",
             f"倍率 = det 核时 / nd 核时（> 1 = det 更慢）· {sz} shape 组 · "
             "msprof kernel 时间（device 侧），非 event record",
             sz,
@@ -1399,7 +1435,7 @@ def draw_perf_pages(prs):
                      f"{_rate(_group_vals(det_ratio, lay, sz), 0.8):.0%}")]
 
         draw_perf_page(
-            prs, f"9.{i+4}", f"性能对比：确定性 vs 确定性（{sz} shape）",
+            prs, f"10.{i+4}", f"性能对比：确定性 vs 确定性（{sz} shape）",
             f"比值 = opst-det / 本仓库-det（≥ 0.8 = 达标）· {sz} shape 组 · "
             "核时为 msprof kernel 时间（device 侧）· 加粗 = 更优的 det 核时 · "
             "下划线 = ratio ≥ 0.8（达标）",
@@ -1426,7 +1462,7 @@ def draw_perf_pages(prs):
                      f"{_rate(_group_vals(nd_ratio, lay, sz), 0.8):.0%}")]
 
         draw_perf_page(
-            prs, f"9.{i+7}", f"性能对比：非确定性 vs 非确定性（{sz} shape）",
+            prs, f"10.{i+7}", f"性能对比：非确定性 vs 非确定性（{sz} shape）",
             f"比值 = opst-nd / 本仓库-nd（≥ 0.8 = 达标）· {sz} shape 组 · "
             "核时为 msprof kernel 时间（device 侧）· 加粗 = 更优的 nd 核时 · "
             "下划线 = ratio ≥ 0.8（达标）",
@@ -1439,7 +1475,7 @@ def draw_perf_pages(prs):
             f"结论：{sz} shape 的 nd 比值 {gm_lay(nd_ratio, 'BSND', sz):.2f}×（BSND）/ "
             f"{gm_lay(nd_ratio, 'TND', sz):.2f}×（TND）；差距来自既有主流水。")
 
-    # ---- 9.10 / 9.11 vs. ops-transformer 性能对比明细 ----
+    # ---- 10.10 / 10.11 vs. ops-transformer 性能对比明细 ----
     draw_perf_detail_page(prs)
 
 
@@ -1449,10 +1485,10 @@ def draw_after_perf(prs):
 
 
 def draw_profiling_pages(prs):
-    """10.1 BSND / 10.2 TND 分 pipe 数据（自适应行高填满版心）+ 10.3 结论。"""
+    """11.1 BSND / 11.2 TND 分 pipe 数据（自适应行高填满版心）+ 11.3 结论。"""
     import profile_data as pf
 
-    # 10.1 / 10.2 版式常量：表格收底 10.60、注记落位 11.12（二者拉开 0.52 in；
+    # 11.1 / 11.2 版式常量：表格收底 10.60、注记落位 11.12（二者拉开 0.52 in；
     # 4:3 画布 12.5 in、版心下边 11.90）
     TABLE_BOTTOM, NOTE_Y = 10.60, 11.12
 
@@ -1484,74 +1520,75 @@ def draw_profiling_pages(prs):
         sd.note(s, 0.73, NOTE_Y, note, w=15.2, h=0.45, size=11.5)
         return s
 
-    data_page("10.1. Profiling · BSND（0.26MB → 41.9MB，五档典型案例）",
+    data_page("11.1. Profiling · BSND（0.26MB → 41.9MB，五档典型案例）",
               pf.BSND_SHAPE, pf.BSND_ROWS,
-              "极小档（0.26 / 0.33MB）ours 明显落后（实测 det 2.3–2.4×、nd 1.4–1.7×，见 10.3）：全部 pipe ≤0.5µs、"
-              "MAC 仅 0.1µs，而 duration 20–34µs ⇒ 差距全在固定开销（启动 + 轮次 / 同步结构）。"
-              "0.92MB 起 det 已占优（实测 1.09×）；中 / 大档 det 缺口集中在 MTE2 与 fixpipe"
-              "（+26.6 / +8.9、+44.8 / +35.0），nd 各口 ≤ opst 而 duration 仍 1.35–1.49×",
+              "极小档（0.26 / 0.33MB）差距已收敛到 ~1.3–1.6×（v3.1 idle-core trim + tiny 单块改 dense；"
+              "tiny causal 的 det 已快于 nd）：pipe 全空、差距在固定开销。0.92MB 起 det 占优（1.23×）；"
+              "中 / 大档 late-wait 后 det 缺口大幅收窄，剩余差距集中在 nd 主流水"
+              "（各口 ≤ opst 而 duration 1.4–1.5×，见 11.3）",
               pf.BSND_SHAPE2)
-    data_page("10.2. Profiling · TND causal（小 / 中 / 大典型案例）",
+    data_page("11.2. Profiling · TND causal（小 / 中 / 大典型案例）",
               pf.TND_SHAPE, pf.TND_ROWS,
-              "与 BSND 同构：中 / 大档 nd 各口 ≤ opst、duration 1.45–1.51×；det 缺口 = MTE2 +62.5 / +54.3、"
-              "fixpipe +80.9 / +64.1；MAC、scalar 均不高于 opst。小档（3.3MB）ours 占优："
-              "实测 nd 1.19×、det 1.29×（profiling 中 ours 的 fixpipe 也远低于 opst）",
+              "小档（3.3MB）ours 占优：实测 nd 1.15×、det 1.30×。中 / 大档：late-wait 后 det 与 opst det 的"
+              "差距（309 vs 260、318 vs 267）已小于 nd 与 opst nd 的差距（278 vs 174、280 vs 175）——"
+              "det 专项已无独立空间，剩余差距 = 共享主流水",
               pf.TND_SHAPE2)
 
-    # ---- 10.3 结论与优化优先级 ----
+    # ---- 11.3 结论与优化优先级 ----
     s = sd.blank_slide(prs)
-    sd.title(s, "10.3. Profiling 结论与优化优先级", y=0.62)
+    sd.title(s, "11.3. Profiling 结论与优化优先级", y=0.62)
     sd.text(s, 0.73, 1.24,
-            "两条主线：① nd 主流水「每条 pipe 都不高、duration 却长 1.4–1.5×」⇒ 重叠 / 串联受限；",
+            "现状：① det 专项收官 —— late-wait 轮屏障（v3.2）落地后，38 case 确定性开销 ours 1.076 ≤ opst 1.319（31/38 更低）；",
             w=15.2, h=0.30, size=12.5, color=sd.BODY_TEXT)
     sd.text(s, 0.73, 1.58,
-            "② det 的增量全部落在 MTE2 + fixpipe（加载与写回），MAC 不高于 opst；"
-            "③ 极小档（0.26–0.33MB）pipe 全空、差距 100% 在固定开销",
+            "② 剩余差距 = nd 主流水「每条 pipe 都不高、duration 却长 1.4–1.6×」⇒ 重叠 / 串联受限；"
+            "③ 极小档（0.26–0.33MB）pipe 全空、差距在固定开销（v3.1 已收敛到 ~1.5×）",
             w=15.2, h=0.30, size=12.5, color=sd.BODY_TEXT)
     rows = [
+        ("det 专项收官",
+         "38 case：ours det/nd 1.076 ≤ opst 1.319，31/38 逐 case 更低；late-wait 把轮屏障的\n"
+         "WAIT 延后一轮（交替奇偶 flag 10/15），TND 代表 case 回收 53~88µs（nobar 上限的 60~76%），\n"
+         "BSND 大档 6~59µs；38 case 位级验证（golden + 10 次逐位 + det/nd 互验）全过",
+         "轮序开销已压到\nopst 之下", "已落地（v3.2\nlate-wait）"),
         ("nd 主流水\n（共同瓶颈）",
-         "TND 中 / 大：duration 283.7 / 282.0 vs opst 188.4 / 194.0（1.51× / 1.45×），但 MTE2 69.7 / 76.1\n"
-         "vs 62.7 / 66.6、fixpipe 97.8 / 102.9 vs 150.8 / 154.8、scal_c 78.1 / 75.5 vs 94.4 / 96.1；\n"
-         "cube% 86 / 89 vs 95 / 95。BSND 中 / 大同构（91.0 / 263.3 vs 67.2 / 177.0，各口 ≤ opst）",
-         "重叠 / 每任务\n串联受限", "① 主流水重叠\n（round、barrier、\n双缓冲）"),
-        ("det 增量在\n加载与写回",
-         "TND 中：MTE2 +62.5（194.4 vs 131.9）、fixpipe +80.9（261.8 vs 180.9）；TND 大 +54.3 / +64.1；\n"
-         "BSND 中 +26.6 / +8.9、大 +44.8 / +35.0。MAC 均不高于 opst —— 不是算得慢，是搬得多、写得多",
-         "重复加载 Q / Kᵀ / K / dY\n+ fp32 原子累加与每列 cast", "② BN2S2 det 引入\nKV 驻留 + L0C 累积"),
+         "TND 中 / 大 nd：duration 278.1 / 279.7 vs opst 174.3 / 175.3（1.60×），但 MTE2 68.6 / 74.6\n"
+         "vs 54.9 / 55.1、fixpipe 96.8 / 100.9 vs 143.7 / 144.3、scal_c 77.5 / 75.9 vs 93.1 / 93.7；\n"
+         "cube% 87 / 89 vs 95 / 95。BSND 41.9MB 同构（250.4 vs 170.3，各口 ≤ opst）",
+         "重叠 / 每任务\n串联受限", "① 主流水加深\n（槽位重排，\n结构项）"),
+        ("极小 shape\n（0.26–0.33MB）",
+         "v3.1 后：0.33MB det 16.2 vs opst 10.4（1.6×）、0.26MB det 13.2 vs 8.9（1.5×）；\n"
+         "tiny causal det 已快于 nd（det/nd 0.89–0.94）。profiling：全部 pipe ≤4µs、\n"
+         "MAC ≤2µs，duration 13–16µs ⇒ 剩余差距在固定开销（启动 + 序言标量）",
+         "固定开销（启动 +\n序言标量）", "④ 序言精简\n（低优先级）"),
         ("scalar / 解码\n不是瓶颈",
-         "nd scal_c 全面低于 opst（TND 78.1/75.5 vs 94.4/96.1；BSND 20.9/67.4 vs 29.6/77.8）；\n"
-         "det 仅 +21.0/+14.0/+0.6；nd 实例化中 det 解码被 if constexpr 编译掉（lookahead 收益 ≈ 0）",
+         "nd scal_c 全面低于 opst（TND 77.5/75.9 vs 93.1/93.7；BSND 65.7 vs 75.5）；\n"
+         "消融实测：前瞻解码缓存、流水 flag 削减、K/V 加载隐藏均为中性或负收益",
          "不是瓶颈", "③ 解码 / scalar 不做"),
-        ("极小 shape\n（0.26–0.33MB）\n仍未占优",
-         "0.33MB：det 24.6 vs 10.4（2.4×）、nd 15.0 vs 10.4（1.4×）\n"
-         "0.26MB：det 20.2 vs 8.9（2.3×）、nd 14.6 vs 8.9（1.6×）\n"
-         "profiling：全部 pipe ≤0.5µs、MAC 0.1µs，而 duration 22–34µs ⇒ 差距全在固定开销",
-         "固定开销（启动 +\n轮次 / 同步结构）", "④ 固定开销专项\n（低优先级，暂不投入）"),
-        ("≥0.9MB 已占优\n或持平",
-         "0.92MB：det 24.8 vs 26.9（1.09×）、nd 20.5 vs 20.4（1.00×）\n"
-         "TND 3.3MB：21.3/29.9 vs 25.4/38.7（1.19×/1.29×）",
-         "规模够大后固定开销摊薄", "维持现状"),
+        ("≥0.9MB det 已占优\n或持平",
+         "0.92MB：det 21.4 vs 26.3（1.23×）；TND 3.3MB：21.6/29.6 vs 24.9/38.5（1.15×/1.30×）\n"
+         "TND 中档 2/6、大档 1/4 也过 0.8 线（late-wait 前为 0）",
+         "规模摊薄固定开销\n+ late-wait", "维持现状"),
     ]
-    sd.spec_table(s, 0.73, 2.06, ("观察", "证据（10.1 / 10.2 数据 + 实测 median of 25）", "判断", "行动"),
+    sd.spec_table(s, 0.73, 2.06, ("观察", "证据（11.1 / 11.2 数据 + 实测 median of 25）", "判断", "行动"),
                   rows, col_w=(1.85, 7.30, 2.30, 3.25),
-                  row_h=[0.44, 1.14, 1.10, 0.92, 1.00, 0.76], zebra=True,
+                  row_h=[0.44, 1.14, 1.14, 0.92, 0.92, 0.76], zebra=True,
                   size=11.5, header_size=12.5)
     ty = 2.06 + 0.44 + 1.14 + 1.10 + 0.92 + 1.00 + 0.76 + 0.24
-    sd.text(s, 0.73, ty, "优化优先级（按收益面排序；本轮仅记录，不改代码）",
+    sd.text(s, 0.73, ty, "优化优先级与落地状态（late-wait 之后重估）",
             w=14.0, h=0.30, size=13.0, bold=True, color=sd.TITLE_TEXT)
     prows = [
-        ("①", "主流水重叠：减少 round / barrier 与每任务串联，双缓冲、加深流水",
-         "nd 各口低于 opst 但慢 1.45–1.51×，cube% 86–89 vs 95", "nd 与 det 同时受益"),
-        ("②", "BN2S2 det 驻留化：KV 组驻留 + L0C 累积（对齐目标主流水，参照合并前的 nd 路径）",
-         "det MTE2 +54~+63、fixpipe +64~+81（中 / 大 TND）", "直接消 det 缺口"),
-        ("③", "固定开销专项：极小 shape（≤0.35MB）的启动 / 轮次 / 同步裁剪",
-         "0.26–0.33MB det 2.3–2.4×、nd 1.4–1.7×；pipe 全空", "仅影响极小档，低优先级"),
-        ("④", "解码 / scalar 专项",
-         "nd scal_c 低于 opst；det 仅 +0.6~+21；lookahead 削减收益 ≈ 0", "不做"),
+        ("①", "主流水加深 / 重叠：L1 已满（512KB），需槽位重排或 tile 调整（结构项，多日）",
+         "nd 各口低但慢 1.4–1.6×，MAC 仅占 cube 一半", "nd+det 同受益（最大杠杆）"),
+        ("②", "det 轮屏障 late-wait：WAIT 延后一轮、交替奇偶 flag（已落地，v3.2）",
+         "TND −53~−88µs、BSND −6~−59µs；开销 1.076 ≤ opst 1.319", "det 专项收官"),
+        ("③", "tiny 固定开销：idle-core trim + 单块 causal 改 dense（已落地，v3.1）",
+         "小档 det ratio 0.64→0.81；剩余 ~1.5× 在序言标量", "④ 序言精简（低优先级）"),
+        ("④", "解码 / scalar、K/V 驻留、flush 合并、流水 flag 削减",
+         "消融实测全部中性或负收益（交错 A/B 验证）", "不做"),
     ]
     sd.spec_table(s, 0.73, ty + 0.42, ("#", "方向", "依据", "预期"),
                   prows, col_w=(0.45, 7.40, 4.35, 2.50),
-                  row_h=[0.42, 0.78, 0.78, 0.60, 0.50], zebra=True,
+                  row_h=[0.42, 0.78, 0.70, 0.62, 0.50], zebra=True,
                   size=11.0, header_size=12.0)
     return s
 

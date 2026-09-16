@@ -30,10 +30,10 @@
 
 | 文件 | 说明 |
 |---|---|
-| `index_schedules.py` | 七种任务索引算法的 Python 实现 + 三条不变量校验 |
+| `index_schedules.py` | 八种任务索引算法的 Python 实现 + 三条不变量校验 |
 | `draw_case.py` | 用 `scripts/seeten_draw.py` 画出案例页 |
 | `check_case.py` | 内容自检：矩阵回读对照算法、印刷公式回代、结论句核对 |
-| `out/v3-index-schedules.pptx` | 生成的页面（32 页：总览 + 轴遍历与 dS 分块 + 虚拟列专页 + 7 种方法 x 2 + 一页更难的 S2 ≠ S1 例子 + 十页性能对比：确定性开销 / 确定性 vs 确定性 / nd-vs-nd 各按 小/中/大 shape 分页（横轴 = case 序号 + 数据 size MB；每页 BSND｜TND 两幅全宽图 + 两张按 case 的 shape/核时表，含 GM/pass 汇总行）+ 全矩阵明细 BSND/TND 两页（9.10/9.11，标题「vs. ops-transformer 性能对比明细」） + profiling 三页：分 pipe 用时表（BSND 五档 0.26MB–41.9MB（含最小档）、TND causal 小/中/大）+ 瓶颈结论与优化优先级） |
+| `out/v3-index-schedules.pptx` | 生成的页面（34 页：总览 + 轴遍历与 dS 分块 + 虚拟列专页 + 8 种方法 x 2 + 一页更难的 S2 ≠ S1 例子 + 十页性能对比：确定性开销 / 确定性 vs 确定性 / nd-vs-nd 各按 小/中/大 shape 分页（横轴 = case 序号 + 数据 size MB；每页 BSND｜TND 两幅全宽图 + 两张按 case 的 shape/核时表，含 GM/pass 汇总行）+ 全矩阵明细 BSND/TND 两页（9.10/9.11，标题「vs. ops-transformer 性能对比明细」） + profiling 三页：分 pipe 用时表（BSND 五档 0.26MB–41.9MB（含最小档）、TND causal 小/中/大）+ 瓶颈结论与优化优先级） |
 
 ```bash
 python index_schedules.py          # 先看七种算法的校验结果（应全为 0 冲突）
@@ -41,7 +41,7 @@ python draw_case.py out/v3-index-schedules.pptx   # 生成页面
 python check_case.py out/v3-index-schedules.pptx  # 矩阵 + 公式 + 结论自检
 ```
 
-## 七种索引算法
+## 八种索引算法
 
 输入都是"第几轮 + 哪条核"，输出"这一轮这条核算哪一块"（批 / 头 / 组 / S1 / S2）。
 它们是纯标量整数运算 —— 同一 (轮, 核) 每次结果相同，这就是确定性的来源。
@@ -55,6 +55,7 @@ python check_case.py out/v3-index-schedules.pptx  # 矩阵 + 公式 + 结论自�
 | 5 | GQA 切片 | 一条核独占 R 个连续任务号，gcd 修正让同轮键不撞 | k=2, 2×2 块, 组 2 | 4 轮 8 任务 |
 | 6 | 变长列私有 | 逐批 round 前缀，批内列私有；各批轮数可以不同 | k=2, 长度不等 | 12 任务 + 2 空泡 |
 | 7 | 变长展平 | 按面积前缀展平后等分成 k 段，每段顺序扫 | k=2, 组 2 | 12 任务零空泡 |
+| 8 | 变长因果（左上分解） | host 把变长 causal 三角拆成整批三角段（head 均分到核）+ 奇 head 尾段；device 纯算术解码 | k=2, b=2 [3,2] 块, n2=2 | 9 轮 18 任务零空泡 |
 
 ## 校验的三条不变量
 
@@ -64,8 +65,9 @@ python check_case.py out/v3-index-schedules.pptx  # 矩阵 + 公式 + 结论自�
 2. **同一轮 S1 不撞**：同一轮里没有两条核写同一个输出分块 —— 跨核原子加要有序就靠这条；
 3. **列私有**（swizzle 类）：一条核在连续若干轮里独占同一条列，列内 S1 不重复地转完。
 
-七种算法在上表规模下**全部通过**（重复 0、冲突 0）。变长展平（GQA 类）不做列私有 ——
-它靠展平切片 + 轮内键互不相同来保证顺序，这是设计选择，不是缺陷。
+八种算法在上表规模下**全部通过**（重复 0、冲突 0）。GQA 类（5、7）与变长因果（8）
+不做列私有 —— 它们靠轮内键互不相同 + 轮屏障定序的共享 workspace 累加来保证顺序，
+这是设计选择，不是缺陷。
 
 ## 已知的坑
 
@@ -75,6 +77,15 @@ python check_case.py out/v3-index-schedules.pptx  # 矩阵 + 公式 + 结论自�
 - 第 4 种算法的 `m > n` 分支，**当前选择器不会选中它**（只在 S1 = S2 时选它，那条路径会
   委托给第 3 种）。第 5 页画的是委托路径，第 5b 页单独画 `m > n` 的几何并明确标注
   `⚠ 选择器不会走这一支` —— 两页数据都是真的跑出来的，但只有 S1 = S2 那条能到达。
+- **选择器现状（2026-09-15 后）**：
+  - BSND causal MHA：偶 batch 且 S1 = S2 才走左上折叠；**v3.1 起 m == n == 1 的单块方格
+    例外** —— 折叠会把两条 (batch, head) 折进同一 lane 串行，改走 dense + causal mask
+    （2 核 1 轮并行，mask 代价可忽略）；
+  - TND causal MHA：**每 batch 都 S1 = S2** 才走第 8 种（左上分解，共享 workspace）；
+    任一批 S1 ≠ S2 → dense + causal mask（右下对齐 mask 下唯一正确）；
+  - TND MHA dense：`TndDenseSafe`（每批 S1 块数 ≥ min(k, S2 块数)）满足时走第 6 种
+    （逐批列私有），不满足时**改走第 7 种展平**（不再是旧 fallback）；
+  - GQA：BSND 一律第 5 种（epilogue mask 处理 causal），TND 一律第 7 种展平。
 - **GQA 的"列是否跨核"是条件性的，不能写成"必然横跨"**：同一 KV 列 `(b, n2, s2)` 的 g 份
   贡献是否落在同一条核，取决于 `R` 与 `g` 的对齐以及 gcd 修正是否触发。本案例的 2 核例子
   恰好每列同核，所以页面按"不保证同核"表述，而不是"横跨多条核"。

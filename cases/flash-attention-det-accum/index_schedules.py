@@ -1,4 +1,4 @@
-"""案例数据：把「(轮, 核) → (批, 头, 组, S1, S2)」的七种任务索引算法做成可算的纯函数。
+"""案例数据：把「(轮, 核) → (批, 头, 组, S1, S2)」的八种任务索引算法做成可算的纯函数。
 
 这些函数都是纯标量整数运算，取自一个 Ascend FA 反向算子的确定性梯度累加方案
 （"事前调度"路线：先排好任务，让一条核独占一条 KV 列，dK/dV 就由单核按程序序累加）。
@@ -21,11 +21,12 @@ KIND_LEFT_UP_CAUSAL = 4       # 左上对齐 causal
 KIND_GQA_DENSE = 5            # GQA：任务切片 + gcd 修正
 KIND_TND_DENSE = 6            # 变长 batch（MHA）：逐批列私有
 KIND_TND_GQA_DENSE = 7        # 变长 batch（GQA）：按面积展平
+KIND_TND_CAUSAL = 8           # 变长 causal（MHA）：左上分解 + 四段拼合
 
 KIND_CN = {KIND_DENSE_SWIZZLE: "列私有 swizzle", KIND_DENSE_INDEX: "先分批再分列",
            KIND_CAUSAL_SWIZZLE: "因果折叠", KIND_LEFT_UP_CAUSAL: "左上因果折叠",
            KIND_GQA_DENSE: "GQA 切片", KIND_TND_DENSE: "变长列私有",
-           KIND_TND_GQA_DENSE: "变长展平"}
+           KIND_TND_GQA_DENSE: "变长展平", KIND_TND_CAUSAL: "变长因果"}
 
 
 # ---------------------------------------------------------------- 标量助手
@@ -87,7 +88,7 @@ class Coord:
     fold: list = field(default_factory=lambda: [(0, 0), (0, 0)])   # [(批, s2), ...]
 
 
-# ---------------------------------------------------------------- 七种算法
+# ---------------------------------------------------------------- 八种算法
 
 def cal_dense_swizzle_index(k, m, n, b, j, r, c: Raw):
     """列私有 swizzle：一条 lane 在 m 轮内独占一条 KV 列，列内把 S1 逐行走一遍。"""
@@ -293,6 +294,213 @@ def cal_tnd_gqa_dense(s: Shape, cu_q, cu_k, area_prefix, j, r, max_round, out: C
 
 # ---------------------------------------------------------------- 门面与校验
 
+def tnd_causal_host_params(seq_q, seq_kv, n2, k):
+    """变长 causal（MHA, g==1, step=1）的 host 前缀表（opst
+    CalcleTNDCausalDeterPrefix/ParamNormal 的移植）。
+
+    返回 dict: b/m/n（各 batch 的块数）、p0/p1/p2（段前缀，含末尾轮数项）、
+    max_round、N11/N12。四段：段1 = 整批左上三角（均分 head 部分），
+    段2 = 余下的对角带（N11 对），段3/段4 = n2 为奇数时剩余单 head 的两半。
+    """
+    b = len(seq_q)
+    m = [ceil_div(sq, 128) for sq in seq_q]
+    n = [min(ceil_div(sq, 128), ceil_div(sk, 128))
+         for sq, sk in zip(seq_q, seq_kv)]          # left-up：n 裁到 m
+    N12 = (n2 % k) % 2
+    prefix0, prefix1, prefix2 = [0], [0], [0]
+    m0_max = m1_max = m2_max = 0
+    for i in range(b):
+        mm, nn = m[i], n[i]
+        m0_max = max(m0_max, 2 * mm - nn + 1)
+        prefix0.append(prefix0[-1] + (2 * mm - nn + 1) * nn)
+        if N12 > 0:
+            prefix1.append(prefix1[-1] + (mm - (nn + 1) // 2 + 1) * (nn // 2))
+            m1_max = max(m1_max, mm - (nn + 1) // 2 + 1)
+            prefix2.append(prefix2[-1] + (mm - nn // 2) * ((nn + 1) // 2))
+            m2_max = max(m2_max, mm - nn // 2)
+    N11 = (n2 % k) // 2
+    prefix0_max1 = prefix0[-1] // 2 * (n2 // k)
+    prefix0_max2 = max(ceil_div(prefix0[-1] * N11, k), m0_max)
+    p0 = prefix0 + [prefix0_max1]
+    max_round = prefix0_max1
+    if N11 > 0:
+        p0.append(prefix0_max2)
+        max_round += prefix0_max2
+    else:
+        p0.append(0)
+    if N12 > 0:
+        r1 = max(ceil_div(prefix1[-1], k), m1_max)
+        r2 = max(ceil_div(prefix2[-1], k), m2_max)
+        p1, p2 = prefix1 + [r1], prefix2 + [r2]
+        max_round += r1 + r2
+    else:
+        p1 = [0] * (b + 2)
+        p2 = [0] * (b + 2)
+    return dict(b=b, m=m, n=n, n2=n2, k=k, p0=p0, p1=p1, p2=p2,
+                max_round=max_round, N11=N11, N12=N12)
+
+
+def _tnd_cal_virtual_index(flag, m, n):
+    """opst CalVirtualIndex：真实 (m,n) → 该段虚拟尺寸。"""
+    if m < n:
+        n = m
+    if flag == 0:
+        m = 2 * m - n + 1
+    elif flag == 1:
+        m = m - (n + 1) // 2 + 1
+        n = n // 2
+    else:
+        m = m - n // 2
+        n = (n + 1) // 2
+    return m, n
+
+
+def _tnd_causal_pos_whole_batch(m, n, a):
+    """opst CalCausalPosWholeBatch：段 1 的 (s1, s2) 解码。"""
+    n1 = n // 2 * 2
+    L = 2 * m - n1 + 1
+    rm_local = n1 * L // 2
+    if a <= rm_local:
+        y = ceil_div(a, L)
+        r1 = nz(a % L, L)
+        x = r1 + y - 1
+        if x > m:
+            x = 2 * m + 1 - x
+            y = n1 + 1 - y
+    else:
+        a1 = a - rm_local
+        y = n
+        x = a1 - 1 + y
+    return x, y
+
+
+def _tnd_dense_causal_index(params, prefix, deter_max_round, flag, j, r,
+                            inner_n2):
+    """opst CalTNDDenseCausalIndex：段 2/3/4 的内层解码（返回 inner 组合批号
+    与虚拟坐标；真实折回由调用方做）。"""
+    b, k = params["b"], params["k"]
+    if r > deter_max_round:
+        return None
+    n1 = inner_n2
+    ID = (j - 1) * deter_max_round + r
+    w = 0
+    while (w + 1) < b and ID > prefix[w + 1] * n1:
+        w += 1
+    if w >= b:
+        return None
+    delta = ID - prefix[w] * n1
+    real_m, real_n = params["m"][w], params["n"][w]
+    mm, nn = _tnd_cal_virtual_index(flag, real_m, min(real_m, real_n))
+    base = mm * nn
+    delta_n = (delta - 1) // base + 1
+    delta = nz(delta % base, base)
+    gd = gcd(mm, deter_max_round)
+    t1 = deter_max_round // gd
+    t2 = mm // gd
+    x = (delta - 1) % mm + 1
+    y = (delta - 1) // mm + 1
+    if t1 < nn:
+        n_tail = nz(nn % t1, t1)
+        if y <= nn - n_tail:
+            adj = ceil_div(y, t1)
+            delta += adj
+            if delta > adj * t2 * deter_max_round:
+                delta -= t2 * deter_max_round
+            x = (delta - 1) % mm + 1
+            y = (delta - 1) // mm + 1
+    return dict(batch=w, n2=delta_n, s1=x, s2=y, comb=w * n1 + delta_n,
+                real_m=real_m, real_n=real_n)
+
+
+def cal_tnd_causal_index(params, j, r, out: Coord):
+    """opst CalTNDCausalIndex（MHA, step=1）：(轮, 核) → Coord 或 None。"""
+    out.__init__()
+    b, k, n2 = params["b"], params["k"], params["n2"]
+    if not (1 <= j <= k) or not (1 <= r <= params["max_round"]):
+        return False
+    max_idx = b + 1                                    # step = 1
+    R01, R02 = params["p0"][max_idx], params["p0"][max_idx + 1]
+    R0 = R01 + R02
+    R1, R2 = params["p1"][max_idx], params["p2"][max_idx]
+    N1 = n2                                            # g == 1
+
+    def fill(hb, hn2, x, y):
+        if not (0 <= hb < b and 1 <= hn2 <= n2 and
+                1 <= x <= params["m"][hb] and 1 <= y <= params["n"][hb]):
+            return False
+        out.batch, out.n2, out.g = hb, hn2 - 1, 0
+        out.s1, out.s2, out.valid = x - 1, y - 1, True
+        return True
+
+    if r <= R01:                                       # 段 1：整批左上三角
+        N10 = N1 // k
+        if N10 <= 0:
+            return False
+        a_judge = ceil_div(r * 2, N10)
+        w = 0
+        while (w + 1) < b and a_judge > params["p0"][w + 1]:
+            w += 1
+        if w >= b:
+            return False
+        a = r - params["p0"][w] * N10 // 2
+        while True:
+            mm, nn = params["m"][w], params["n"][w]
+            round_batch = (2 * mm - nn + 1) * nn // 2
+            if a <= round_batch * N10:
+                break
+            a -= round_batch * N10
+            w += 1
+            if w >= b:
+                return False
+        a0 = nz(a % round_batch, round_batch)
+        x, y = _tnd_causal_pos_whole_batch(mm, nn, a0)
+        w2 = (a - 1) // round_batch * k + j
+        w2 = ((w2 - 1) // k) * k + ((y - 1 + (w2 - 1)) % k) + 1
+        head = w * N1 + w2
+        return fill((head - 1) // N1, (head - 1) % N1 + 1, x, y)
+
+    if r <= R0:                                        # 段 2：对角带（N11 对）
+        d = _tnd_dense_causal_index(params, params["p0"], R02, 0, j, r - R01,
+                                    params["N11"])
+        if d is None:
+            return False
+        x, y = d["s1"], d["s2"]
+        m, n = d["real_m"], min(d["real_m"], d["real_n"])
+        b1 = ceil_div(d["comb"], params["N11"])
+        b2 = nz(d["comb"] % params["N11"], params["N11"])
+        if x >= y + m - n + 1:
+            x, b2 = x - (m - n + 1), 2 * b2 - 1
+        else:
+            x, y, b2 = m + 1 - x, n + 1 - y, 2 * b2
+        head = (b1 - 1) * N1 + (N1 // k) * k + b2
+        return fill((head - 1) // N1, (head - 1) % N1 + 1, x, y)
+
+    if r <= R0 + R1:                                   # 段 3：奇 head 左半
+        d = _tnd_dense_causal_index(params, params["p1"], R1, 1, j, r - R0, 1)
+        if d is None:
+            return False
+        x, y = d["s1"], d["s2"]
+        m, n = d["real_m"], min(d["real_m"], d["real_n"])
+        if x >= y + m - n + 1:
+            x = x - (m - n + 1)
+        else:
+            x, y = m + 1 - x, n + 1 - y
+        head = d["comb"] * N1
+        return fill((head - 1) // N1, (head - 1) % N1 + 1, x, y)
+
+    d = _tnd_dense_causal_index(params, params["p2"], R2, 2, j,
+                                r - R0 - R1, 1)        # 段 4：奇 head 右半
+    if d is None:
+        return False
+    x, y = d["s1"], d["s2"]
+    n = min(d["real_m"], d["real_n"])
+    x += n // 2
+    head = d["comb"] * N1
+    return fill((head - 1) // N1, (head - 1) % N1 + 1, x, y)
+
+
+# ---------------------------------------------------------------- 门面与校验
+
 def decode(kind, s: Shape, r, j, **kw):
     """(轮, 核) → Coord 或 None（入参均 1-based）。"""
     out = Coord()
@@ -313,6 +521,9 @@ def decode(kind, s: Shape, r, j, **kw):
     elif kind == KIND_TND_GQA_DENSE:
         ok = cal_tnd_gqa_dense(s, kw["cu_q"], kw["cu_k"], kw["area_prefix"], j, r,
                                  kw["max_round"], out)
+        return out if ok else None
+    elif kind == KIND_TND_CAUSAL:
+        ok = cal_tnd_causal_index(kw["params"], j, r, out)
         return out if ok else None
     else:
         return None
@@ -374,7 +585,7 @@ def check(kind, s: Shape, max_round, **kw):
 
 
 def cases():
-    """案例里用到的 7 个例子（与页面一一对应）。"""
+    """案例里用到的 8 个例子（与页面一一对应）。"""
     out = []
     s = Shape(batch=2, qSeqLen=384, kvSeqLen=384, qHeadNum=1, kvHeadNum=1, coreNum=2)
     out.append(("列私有 swizzle", KIND_DENSE_SWIZZLE, s, 9, {}, False))
@@ -394,6 +605,12 @@ def cases():
     s = Shape(batch=2, qHeadNum=2, kvHeadNum=1, groupNum=2, coreNum=2)
     out.append(("变长展平", KIND_TND_GQA_DENSE, s, 6,
                 dict(cu_q=[256, 384], cu_k=[256, 512], area_prefix=[0, 4, 6]), False))
+    # 变长 causal（MHA）：n2 = 2 偶数 → 只有段1（整批三角），9 轮零 idle；
+    # n2 为奇数时的段3/段4 尾段在页面文字里说明（如 n2=3 → R1=2 / R2=3）
+    s = Shape(batch=2, qHeadNum=2, kvHeadNum=2, coreNum=2)
+    p = tnd_causal_host_params([384, 256], [384, 256], 2, 2)
+    out.append(("变长因果（左上分解）", KIND_TND_CAUSAL, s, p["max_round"],
+                dict(cu_q=[384, 640], cu_k=[384, 640], params=p), True))
     return out
 
 
@@ -401,7 +618,7 @@ if __name__ == "__main__":
     for name, kind, s, mr, kw, _causal in cases():
         r = check(kind, s, mr, **kw)
         gqa = kind in (KIND_GQA_DENSE, KIND_TND_GQA_DENSE)
-        priv = "不适用(GQA 走共享累加)" if gqa else r["column_private"]
+        priv = "不适用(共享 workspace 轮序累加)" if (gqa or kind == KIND_TND_CAUSAL) else r["column_private"]
         print(f"{name:12s} slots={r['slots']:3d} valid={r['valid']:3d} "
               f"holes={r['holes']:2d} dup={r['dup']} dq冲突={r['dq_conflict']} "
               f"列私有={priv}")
