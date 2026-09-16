@@ -1,0 +1,13 @@
+{
+  "title": "dQ 梯度累加的四个收尾分支（accumList 已 Add 合并为一份 addTensor）",
+  "col_w": [1.5, 2.8, 4.6],
+  "header": [[{"t": "分支"}, {"t": "条件"}, {"t": "分支动作"}]],
+  "rows": [
+    [{"t": "①"}, {"t": "同时存在首块和尾块（本 dq 块已累加完）"}, {"t": "Mul + Cast + DataCopy 直写 dQGm，不经 dQWorkSpaceGm"}],
+    [{"t": "②"}, {"t": "仅存在首块且未算完"}, {"t": "DataCopy 拷贝到 dQWorkSpaceGm，等下一轮累加"}],
+    [{"t": "③"}, {"t": "存在中间块（无首无尾）"}, {"t": "AtomicAdd 到 dQWorkSpaceGm"}],
+    [{"t": "④"}, {"t": "仅存在尾块（算完但未遇首块）"}, {"t": "先 Add 合并，再 AtomicAdd 到 dQWorkSpaceGm"}]
+  ],
+  "zebra": true,
+  "size": 11.0
+}
