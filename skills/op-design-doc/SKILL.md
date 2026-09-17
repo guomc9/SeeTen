@@ -1,6 +1,6 @@
 ---
 name: op-design-doc
-description: 编写"算子详细设计 + 性能测试"Markdown 文档 —— 按固定章节骨架（需求分析 → 原型设计 → 特性实现 → Tiling/分核/内存 → 流水 → 测试设计）产出算子详设 .md；遇到 Markdown 表达不了的复杂表格（合并单元格、多级表头、跨行跨列）时，用 scripts/table_image.py 把 JSON 规格直出 PNG 图片嵌入。触发：算子详设、算子设计文档、算子性能测试报告、detailed design、详设模板、合并单元格表格、跨行跨列表格、表格转图片。
+description: 编写"算子详细设计 + 性能测试"Markdown 文档（两种体裁：单版本详设；版本演进的性能优化文档）—— 详设按固定章节骨架（需求分析 → 原型设计 → 特性实现 → Tiling/分核/内存 → 流水 → 测试设计），优化文档按（背景目标 → 方法论 → 优化项 → 负结果台账 → 评测 → 结论）；配图用 LibreOffice 真渲染 pptx 页面（scripts/render_pptx.py）或复杂表格直出 PNG（scripts/table_image.py）。触发：算子详设、算子设计文档、算子性能测试报告、性能优化文档、版本演进、负结果台账、detailed design、详设模板、合并单元格表格、表格转图片、pptx 转图片。
 ---
 
 # 算子详设文档编写（op-design-doc）
@@ -14,12 +14,17 @@ description: 编写"算子详细设计 + 性能测试"Markdown 文档 —— 按
 skills/op-design-doc/
   SKILL.md                        # 本入口
   references/
-    doc-structure.md              # 八节骨架逐章写作规范（写什么、怎么写）
+    doc-structure.md              # 八节骨架逐章写作规范 + 写作风格/数据表约定
     perf-method.md                # 性能测试口径（计时方法、交错 A/B、漂移纪律）
+    pptx-render.md                # ★ pptx 页面 → 图片的真渲染管线（配图必读）
   templates/
-    op-design-template.md         # 可填空的完整模板（复制后逐节替换）
+    op-design-template.md         # 详设模板（单版本：需求→原型→实现→…→测试）
+    op-perf-opt-template.md       # 性能优化文档模板（版本演进：目标→方法论→优化项→
+                                  #   负结果台账→评测→结论；见 references/doc-structure.md）
   scripts/
     table_image.py                # 复杂表格 JSON → PNG（合并单元格/多级表头）
+    render_pptx.py                # pptx → PNG（LibreOffice headless + PyMuPDF；含抽内嵌图）
+    pptx_tweaks.py                # pptx 预处理：去标题页号 / 蓝格白字加粗
   examples/
     branch-table.json             # 普通表格示例（v2-stream dQ 收尾分支）
     merged-table.json             # 跨行跨列示例
@@ -28,6 +33,9 @@ skills/op-design-doc/
 ## 什么时候用它
 
 - 要给一个算子 / kernel 方案写**正式设计文档**（详设）+ 性能测试报告（.md）；
+- 要写**性能优化文档**：版本演进（v0→v1→v2）、每个优化项的问题/方案/正确性/收益、
+  以及"试过但关闭"的**负结果台账**（模板 `templates/op-perf-opt-template.md`）；
+- 配图：把已有演示文件的页面**真渲染**成图片嵌入（`references/pptx-render.md`）；
 - 文档里有 Markdown 原生表格表达不了的表格：**合并单元格、多级表头、跨行跨列、
   需要配色语义的表格** —— 用 `scripts/table_image.py` 出 PNG 嵌入；
 - 需要把已有的性能数据（msprof 核时、分 pipe、多版本对比）整理成规范章节。
@@ -53,10 +61,13 @@ skills/op-design-doc/
 
 ## 工作流
 
+0. **判断体裁**：单版本方案 → 详设（`templates/op-design-template.md`）；
+   版本演进/优化过程 → 性能优化文档（`templates/op-perf-opt-template.md`，
+   其骨架与收益/比值写法见 `references/doc-structure.md`）。
 1. **收集素材**：算子代码（kernel/tiling/调度）、接口定义、已有 profiling/性能数据、
    相关历史文档。性能数据若需新测，口径按 `references/perf-method.md`
    （msprof Task Duration、median of 25、交错 A/B、同会话漂移纪律）。
-2. **复制模板** `templates/op-design-template.md` 为目标 `.md`，逐节替换占位。
+2. **复制模板** 为目标 `.md`，逐节替换占位。表格尽量**由脚本从原始数据直出**。
    图片统一放目标文档旁的 `figs/` 子目录，引用相对路径 `figs/xxx.png`。
 3. **复杂表格出图**：凡是 Markdown 表格写不下的（合并单元格/多级表头/跨行跨列/
    需要底色语义），把表格写成 JSON 规格（见 `examples/*.json` 与脚本 docstring），
@@ -79,11 +90,15 @@ skills/op-design-doc/
 ## 自检清单（交付前逐项过）
 
 1. **结构**：八节齐全、顺序正确；标题含算子/方案名与分支版本。
-2. **数字可回读**：文中每个性能数字都能在附录数据源（脚本输出/CSV）里找到；
-   性能口径（计时方法、warmup/repeat、median）在测试节写明。
-3. **图文一致**：图片文件存在于 `figs/`、与正文引用一致；表格图片内容与正文描述一致。
-4. **术语口径**：与项目现行口径一致（如 `causal / dense`；布局名 BSND/TND；
-   轴名 b/n2/g/s1/s2/d 全小写）。
-5. **案例可复现**：小案例的输入形状、分块数、每轮任务/累加式子全部具体写出，
-   读者能照着推演。
-6. **不过度装饰**：能 Markdown 表格的不出图；图片只放必须合并/配色的表格。
+2. **自包含**：不出现"详见 / 参见某个演示文件"的交叉引用；被引用的页面内容以
+   **真渲染图片**纳入正文；伪代码/面板若已含在页面图内，正文不再重复抄写。
+3. **版本纪律**：一份详设只描述一个版本；后续改进版本另写《性能优化》文档，
+   本文不出现改进版本代号与相关表格。
+4. **数字可回读**：性能数字均可在附录数据源找到；计时口径（msprof / median / A/B）写明。
+5. **图文一致**：图片存在且与正文引用一致；页面图来自真渲染（箭头、字体完整）。
+6. **术语口径**：与项目现行口径一致（如 `causal / dense`；轴名 b/n2/g/s1/s2/d 小写）。
+7. **案例可复现**：小案例的形状、分块数与每轮任务/累加式子具体写出，可照着推演。
+8. **机制断言先对代码核实**：写"怎么算/怎么写"之前回读实现（曾把"每 task 落盘"
+   误写成"列内 L0C 连续累加"）。
+9. **不过度装饰**：简单表格用 Markdown；用例表拆列（b/n2/g/s2/s1/d/mask），
+   重复段长用 `n×v` 简写；表格配色彩克制（白/灰斑马即可）。
