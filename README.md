@@ -18,6 +18,7 @@ SeeTen/
   references/
     style-spec.md               # Measured style spec: canvas / palette / fonts / geometry / table archetypes
     diagram-recipes.md          # Recipes for each diagram type + pre-flight checklist
+    deck-skeleton.md            # Whole-deck page types: numbering, chrome, TOC, appendix, fill, pre-ship scan
   scripts/
     seeten_draw.py              # python-pptx generation library (the core)
     verify_demo.py              # Read the deck back and self-check (table style / borders / fonts)

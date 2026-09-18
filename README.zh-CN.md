@@ -17,6 +17,7 @@ SeeTen/
   references/
     style-spec.md               # 实测风格规范：画布/色板/字体/几何/表式原型
     diagram-recipes.md          # 各类图的画法配方 + 画前自检清单
+    deck-skeleton.md            # 出整本 deck：页型/编号/页眉页脚/目录/附页/收底/交付前扫描
   scripts/
     seeten_draw.py              # python-pptx 生成库（核心）
     verify_demo.py              # 回读生成结果自检（表样式/边框/字体）

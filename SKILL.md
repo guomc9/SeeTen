@@ -1,6 +1,6 @@
 ---
 name: seeten-draw
-description: 用原生 PPT 表格当"张量画布"画张量分块与任务调度示意图 —— 单元格 = 分块，填充色 = 语义，格内写清是哪个轴的哪个索引；再配伪代码块、任务矩阵、覆盖图、流水甘特表。当需要把"分块累加 + 核间同步"这类算子方案画成 PPT 页面、张量块表格、数据流示意图、调度矩阵时使用；也用于把一段 kernel 逻辑讲成"块 + 核 + 轮次"。触发词：张量表格、块网格、数据流图、调度矩阵、流水甘特、伪代码块、python-pptx 画图。
+description: 用原生 PPT 表格当"张量画布"画张量分块与任务调度示意图 —— 单元格 = 分块，填充色 = 语义，格内写清是哪个轴的哪个索引；再配伪代码块、任务矩阵、覆盖图、流水甘特表。当需要把"分块累加 + 核间同步"这类算子方案画成 PPT 页面、张量块表格、数据流示意图、调度矩阵时使用；也用于把一段 kernel 逻辑讲成"块 + 核 + 轮次"，以及用同一套原语摆整本 deck 的页型（封面 / 目录 / 附页 / 尾页）。触发词：张量表格、块网格、数据流图、调度矩阵、流水甘特、伪代码块、目录页、封面页、参考文献附页、python-pptx 画图。
 ---
 
 # SeeTen —— 张量表格绘制
@@ -17,6 +17,7 @@ SeeTen/
   references/
     style-spec.md               # 实测风格规范：画布/色板/字体/几何/表式原型
     diagram-recipes.md          # 各类图的画法配方 + 画前自检清单
+    deck-skeleton.md            # 出整本 deck 时：页型/编号/页眉页脚/目录/附页/收底/交付前扫描
   scripts/
     seeten_draw.py              # python-pptx 生成库（推荐入口：直接调 API）
     verify_demo.py              # 回读生成结果做自检（表样式/边框/字体/CJK 字体）
@@ -57,6 +58,14 @@ SeeTen/
    task_matrix(s, 0.73, 6.0, cores, rows)          # 轮 x 核
    note(s, 0.73, 10.1, "一句话要点")                # 图注
    save(prs, "out.pptx")
+   ```
+   ```python
+   # 色块里写多段文字：写进色块自己的文本框，每段各自定字号（别另叠 TextBox）
+   bar = s.shapes.add_shape(1, Inches(0.73), Inches(6.3), Inches(15.2), Inches(1.5))
+   bar.fill.solid(); bar.fill.fore_color.rgb = _rgb(GROUP2)
+   shape_lines(bar, (("**SeeTen** —— 一句话是什么", 22.0, TITLE_TEXT, True),
+                     ("关键词 · 关键词 · 关键词", 17.0, BODY_TEXT, False)))
+   solid_background(prs.slides[0], "002FA7")       # 封面/尾页：整版底色写 p:bg，不铺矩形
    ```
    ```powershell
    seeten draw --demo examples\demo.pptx    # 通用演示（用提前备好的环境）
@@ -156,6 +165,15 @@ SeeTen/
 
 ## 与其他 skill 的关系
 
-本 skill 只负责**画法**（风格 + 配方 + 生成器），不做完整的 PPTX 工程流程
-（模板/母版/封面/动画）。需要整本 deck 的生成、模板填充、视觉重建时交给 `ppt-master`，
-本 skill 作为它的"张量页"素材来源。
+本 skill 只负责**画法**（风格 + 配方 + 生成器），不做整套视觉设计。需要"一次做完、
+带版式与动效的网页版 slides"时，用 [guizang-ppt-skill](https://github.com/op7418/guizang-ppt-skill.git)
+的模板（`assets/template.html` 电子杂志风 / `assets/template-swiss.html` 瑞士国际主义风）——
+那是 HTML 单文件形态的横向翻页 deck，装好后拷贝模板再往 `<!-- SLIDES_HERE -->` 填页面即可；
+本 skill 与它是**两种产物**（原生 .pptx ↔ 单文件 HTML），页面上要放张量分块图 / 任务矩阵 /
+性能对比这类"数据页"时，用本 skill 画出来再贴进去，别用它的版式硬套。
+
+**但页型骨架是这套库画得出来的** —— 封面 / 目录 / 正文 / 附页 / 尾页用同一套原语就能摆，
+而且比"再找一个工具"更省事。这部分的经验（编号写进标题字符串、整版底色写 `p:bg`、
+页眉页脚 hairline 挂 `perf-grid` 前缀、长表分页按行数配平、交付前扫页面可见文本）
+写在 `references/deck-skeleton.md` —— 出整本 deck 时先读它，硬规则 16 的六道之外
+再加它 §8 的三道。

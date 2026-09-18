@@ -326,6 +326,54 @@ def note(slide, x, y, body: str, w=12.0, h=0.42, size=18.0):
                 wrap=True)
 
 
+def shape_lines(shp, lines, align=PP_ALIGN.LEFT, margin=0.26, space=6.0):
+    """往**图形自带的**文本框里写多行，每行各自定 `(body, size, color, bold)`。
+
+    色块 / 色条里要写多段文字时用这个，**不要另叠一个 TextBox** —— 叠上去的字框
+    和色块几何上重叠，`check_layout()` 会一直报"元素重叠"。`body` 同样支持
+    `**加粗**` / `==强调==` / `__下划线__`。
+
+    两个坑直接写进实现里：
+
+    1. **自选图形的首段 `algn` 默认是 `ctr`**（`add_shape` 带进来的形状样式），
+       而 `add_paragraph()` 加出来的段落默认左对齐 —— 不逐段显式设，页面上就是
+       "第一行居中、后面几行左对齐"。
+    2. 图形自带文本框的 `wrap` 是开的，长句会在框内折行；折行后的实际行数
+       `check_layout()` 不量（它只量图形框），所以**框高要按折行后的行数留够**，
+       不然字会从框底漏出去而检查全绿。
+    """
+    tf = shp.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.margin_left = tf.margin_right = Inches(margin)
+    tf.margin_top = tf.margin_bottom = Inches(0.06)
+    for k, (body, size, color, bold) in enumerate(lines):
+        p = tf.paragraphs[0] if k == 0 else tf.add_paragraph()
+        p.alignment = align
+        if k and space:
+            p.space_before = Pt(space)
+        for seg, seg_bold, seg_color, seg_ul in _rich_segments(body, bold, color):
+            for piece, is_cjk in _split_scripts(seg):
+                run = p.add_run()
+                run.text = piece
+                _style_run(run, size=size, bold=seg_bold, color=seg_color,
+                           font=(CJK if is_cjk else LATIN), cjk_font=CJK,
+                           underline=seg_ul)
+    return shp
+
+
+def solid_background(slide, color: str):
+    """整版铺底：写**页面背景**，而不是画一个盖满整页的矩形。
+
+    盖满整页的矩形四边必然压在版心外，`check_layout()` 会一直报"图形越出版心"；
+    写 `p:bg` 不产生 shape，检查器看不见它，导出/打印也照常。封面、尾页这类
+    整版单色的页用这个。
+    """
+    slide.background.fill.solid()
+    slide.background.fill.fore_color.rgb = _rgb(color)
+    return slide
+
+
 def arrow(slide, x1, y1, x2, y2, color=CONNECTOR, width_pt=1.0):
     """带三角箭头的直线连接线。"""
     conn = slide.shapes.add_connector(
@@ -843,7 +891,15 @@ def pseudocode_block(slide, x, y, w, lines, size=12.5, pad=0.18, line_h=0.235,
     tf.word_wrap = False
     tf.margin_left = tf.margin_right = Inches(pad)
     tf.margin_top = tf.margin_bottom = Inches(pad * 0.5)
-    kw_re = _re.compile(r"(如果|否则|对每个|返回|输入|输出|结束|if|else|for|return|while)")
+    # 英文关键字两侧只允许出现"非 ASCII 字母数字下划线"（不是 \b —— 中文在 Python 的 re
+    # 里算 \w，用 \b 会把 `for每个` 这种紧贴中文的写法漏掉）。
+    # 不加这个边界，`./platform_info` 里的 `for` 会被切出来涂成关键字色（plat|for|m_info），
+    # 同理 `verify` 里的 `if`、`notify` / `modify` 里的 `if`、`return_code` 里的 `return` 都会中招。
+    _NB_L, _NB_R = r"(?<![A-Za-z0-9_])", r"(?![A-Za-z0-9_])"
+    kw_re = _re.compile(
+        r"(如果|否则|对每个|返回|输入|输出|结束" + "|"
+        + "|".join(_NB_L + k + _NB_R for k in
+                   ("if", "elif", "else", "for", "return", "while", "do")) + r")")
     items = ([("code", title)] if title else []) + [("code", ln) for ln in lines]
     for i, (_, raw) in enumerate(items):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
