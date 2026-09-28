@@ -227,6 +227,13 @@ flow(cols, [("为什么确定", ["L", "R"], spec_props),     # (名字, 偏好�
 
 ---
 
+### 配方 11（案例形式）：SIMT 执行体 ↔ 数据对应图
+
+线程 / Warp / block 与 Src/Dst 矩阵的对应画法（三段式布局、首行分工标签、两套箭头、
+量化注记、从外部 PPTX 迁移的步骤与坑）见 `cases/index-select-simt/README.md`。
+
+---
+
 ## 画图前的自检清单
 
 - [ ] `sd.new_deck()` 用了哪个比例？后续所有坐标都按这个比例算。

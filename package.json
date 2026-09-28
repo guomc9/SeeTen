@@ -14,7 +14,7 @@
     "references/",
     "scripts/",
     "assets/",
-    "examples/",
+    "templates/",
     "cases/"
   ],
   "engines": {

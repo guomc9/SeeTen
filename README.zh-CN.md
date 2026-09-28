@@ -25,7 +25,7 @@ SeeTen/
   assets/
     palette.json                # 实测色板与几何常量（EMU 原值）
     color-sets.json             # lane 配色预设 + 伪代码块配色
-  examples/demo.pptx            # 通用演示（2 页）
+  templates/demo.pptx            # 通用演示（2 页）
   cases/                        # 案例：用这套手法画出来的真实方案页
 ```
 
@@ -130,8 +130,8 @@ cp -r SeeTen ~/.claude/skills/seeten-draw
 ### 2.4 直接用（不经过 agent）
 
 ```bash
-python scripts/seeten_draw.py examples/demo.pptx   # 生成演示 deck
-python scripts/verify_demo.py examples/demo.pptx   # 回读自检
+python scripts/seeten_draw.py templates/demo.pptx   # 生成演示 deck
+python scripts/verify_demo.py templates/demo.pptx   # 回读自检
 ```
 
 ## 3. 快速上手
@@ -177,9 +177,9 @@ print(check_layout(prs))         # 收尾必须 0 越界 0 重叠
 
 ```powershell
 # 需要本机装了 WPS（用它的 COM 接口）
-powershell -File scripts\render_deck.ps1 examples\demo.pptx
+powershell -File scripts\render_deck.ps1 templates\demo.pptx
 # 装了 LibreOffice 的话
-soffice --headless --convert-to png --outdir <目录> examples\demo.pptx
+soffice --headless --convert-to png --outdir <目录> templates\demo.pptx
 ```
 
 导出的 PNG 放在 pptx 同级的 `_render\`，逐页看一眼再调版式。

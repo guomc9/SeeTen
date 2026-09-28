@@ -6,8 +6,8 @@
       soffice --headless --convert-to png --outdir <dir> <pptx>
 
 用法：
-    powershell -File render_deck.ps1 examples\v4-index-schedules.pptx
-    powershell -File render_deck.ps1 examples\v4-index-schedules.pptx out_dir 1600 1200
+    powershell -File render_deck.ps1 templates\v4-index-schedules.pptx
+    powershell -File render_deck.ps1 templates\v4-index-schedules.pptx out_dir 1600 1200
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Pptx,

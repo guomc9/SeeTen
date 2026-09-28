@@ -16,7 +16,7 @@
     save(prs, "out.pptx")
     print(check_layout(prs))         # 收尾必须 0 越界 0 重叠
 
-    python seeten_draw.py examples/demo.pptx   # 生成通用演示 deck
+    python seeten_draw.py templates/demo.pptx   # 生成通用演示 deck
 """
 
 from __future__ import annotations

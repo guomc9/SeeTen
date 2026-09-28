@@ -25,7 +25,7 @@ SeeTen/
   assets/
     palette.json                # 实测色板与几何常量（EMU 原值）
     color-sets.json             # lane 配色预设 + 伪代码块配色
-  examples/
+  templates/
     demo.pptx                   # 通用演示（由 seeten_draw.py 的 demo() 生成）
   cases/                        # 案例：用这套规范画出来的真实方案页
 ```
@@ -68,17 +68,17 @@ SeeTen/
    solid_background(prs.slides[0], "002FA7")       # 封面/尾页：整版底色写 p:bg，不铺矩形
    ```
    ```powershell
-   seeten draw --demo examples\demo.pptx    # 通用演示（用提前备好的环境）
-   seeten render examples\demo.pptx         # 导出 PNG 逐页看图
+   seeten draw --demo templates\demo.pptx    # 通用演示（用提前备好的环境）
+   seeten render templates\demo.pptx         # 导出 PNG 逐页看图
    seeten doctor                            # 环境出问题时先跑这个
    ```
-   没装 CLI 的话，等价的手工命令是 `python scripts\seeten_draw.py examples\demo.pptx`
+   没装 CLI 的话，等价的手工命令是 `python scripts\seeten_draw.py templates\demo.pptx`
    （需先 `pip install python-pptx`）。
 5. **自检**：跑 `verify_demo.py` 确认表样式已剥离、边框/字体/CJK 字体在位。
 6. **渲染看一眼（必做，别只靠数字判断版式）**：
    ```powershell
-   seeten render examples\demo.pptx
-   # 或直接用脚本：powershell -File scripts\render_deck.ps1 examples\demo.pptx
+   seeten render templates\demo.pptx
+   # 或直接用脚本：powershell -File scripts\render_deck.ps1 templates\demo.pptx
    ```
    它用本机 WPS 的 COM 接口（`KWPP.Application`）把每页导成 PNG 到同级 `_render\`，
    然后用 Read 工具**逐页看图**改版式 —— 空白是否过多、标记是否贴错表、字号是否被挤，

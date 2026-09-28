@@ -26,7 +26,7 @@ SeeTen/
   assets/
     palette.json                # Measured palette and geometry constants (raw EMU)
     color-sets.json             # Lane color presets + pseudocode block colors
-  examples/demo.pptx            # Generic demo (2 pages)
+  templates/demo.pptx            # Generic demo (2 pages)
   cases/                        # Case studies: real scheme pages drawn with these rules
 ```
 
@@ -138,8 +138,8 @@ Read SeeTen/SKILL.md and draw a page for xxx following its conventions.
 ### 2.4 Using it directly (no agent)
 
 ```bash
-python scripts/seeten_draw.py examples/demo.pptx   # build the demo deck
-python scripts/verify_demo.py examples/demo.pptx   # read it back and self-check
+python scripts/seeten_draw.py templates/demo.pptx   # build the demo deck
+python scripts/verify_demo.py templates/demo.pptx   # read it back and self-check
 ```
 
 ## 3. Quick start
@@ -186,9 +186,9 @@ Numeric checks (`check_layout`) only prove "nothing is out of bounds and nothing
 
 ```powershell
 # Needs WPS Office installed (uses its COM interface)
-powershell -File scripts\render_deck.ps1 examples\demo.pptx
+powershell -File scripts\render_deck.ps1 templates\demo.pptx
 # Or, with LibreOffice
-soffice --headless --convert-to png --outdir <dir> examples\demo.pptx
+soffice --headless --convert-to png --outdir <dir> templates\demo.pptx
 ```
 
 The PNGs land in `_render\` next to the pptx. Look through them page by page before adjusting.
